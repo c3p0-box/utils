@@ -6,7 +6,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/c3p0-box/utils/erm"
 )
+
+// =============================================================================
+// String Validator Type and Constructor
+// =============================================================================
 
 // StringValidator provides validation rules for string values.
 // It supports method chaining for readable and maintainable validation.
@@ -28,6 +34,12 @@ func String(value string, fieldName string) *StringValidator {
 		BaseValidator: NewBaseValidator(value, fieldName),
 	}
 }
+
+// =============================================================================
+// Chain Methods
+// =============================================================================
+// Note: Chain methods (Not, When, Unless, Custom) are inherited from BaseValidator
+// and automatically return the correct type through interface satisfaction.
 
 // Not negates the next validation rule.
 func (sv *StringValidator) Not() *StringValidator {
@@ -53,6 +65,10 @@ func (sv *StringValidator) Custom(fn func(value interface{}) error) *StringValid
 	return sv
 }
 
+// =============================================================================
+// Basic Validation
+// =============================================================================
+
 // Required validates that the string is not empty (after trimming whitespace).
 func (sv *StringValidator) Required() *StringValidator {
 	if !sv.shouldValidate() {
@@ -60,94 +76,101 @@ func (sv *StringValidator) Required() *StringValidator {
 	}
 
 	str := toString(sv.value)
-	isEmpty := strings.TrimSpace(str) == ""
+	isValid := !isEmpty(str)
 
-	if isEmpty && !sv.negated {
-		sv.addValidationError(CodeRequired, "{{field}} is required", nil)
-	} else if !isEmpty && sv.negated {
-		sv.addValidationError("not_"+CodeRequired, "{{field}} must be empty", nil)
+	if !isValid && !sv.negated {
+		sv.addValidationError("required", MsgRequired, nil)
+	} else if isValid && sv.negated {
+		sv.addValidationError("not_required", "validation.empty", nil)
 	}
 
 	sv.negated = false
 	return sv
 }
 
-// Empty validates that the string is empty.
+// Empty validates that the string is empty (exactly empty, not just whitespace).
 func (sv *StringValidator) Empty() *StringValidator {
 	if !sv.shouldValidate() {
 		return sv
 	}
 
 	str := toString(sv.value)
-	isEmpty := str == ""
+	isValid := str == ""
 
-	if !isEmpty && !sv.negated {
-		sv.addValidationError(CodeRequired, "{{field}} must be empty", nil)
-	} else if isEmpty && sv.negated {
-		sv.addValidationError("not_"+CodeRequired, "{{field}} must not be empty", nil)
+	if !isValid && !sv.negated {
+		sv.addValidationError("required", "validation.empty", nil)
+	} else if isValid && sv.negated {
+		sv.addValidationError("not_required", "validation.not_empty", nil)
 	}
 
 	sv.negated = false
 	return sv
 }
 
-// MinLength validates that the string length is at least the specified minimum.
+// =============================================================================
+// Length/Range Validation
+// =============================================================================
+
+// MinLength validates that the string has at least the specified number of characters.
 func (sv *StringValidator) MinLength(min int) *StringValidator {
 	if !sv.shouldValidate() {
 		return sv
 	}
 
-	length := getLength(sv.value)
-	valid := length >= min
+	str := toString(sv.value)
+	length := getLength(str)
+	isValid := length >= min
 
-	if !valid && !sv.negated {
-		sv.addValidationError(CodeMinLength, "{{field}} must be at least {{min}} characters long",
-			map[string]interface{}{"min": min, "length": length})
-	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeMinLength, "{{field}} must be less than {{min}} characters long",
-			map[string]interface{}{"min": min, "length": length})
+	if !isValid && !sv.negated {
+		sv.addValidationError("min_length", MsgMinLength,
+			map[string]interface{}{"min": min})
+	} else if isValid && sv.negated {
+		sv.addValidationError("not_min_length", "validation.not_min_length",
+			map[string]interface{}{"min": min})
 	}
 
 	sv.negated = false
 	return sv
 }
 
-// MaxLength validates that the string length is at most the specified maximum.
+// MaxLength validates that the string has at most the specified number of characters.
 func (sv *StringValidator) MaxLength(max int) *StringValidator {
 	if !sv.shouldValidate() {
 		return sv
 	}
 
-	length := getLength(sv.value)
-	valid := length <= max
+	str := toString(sv.value)
+	length := getLength(str)
+	isValid := length <= max
 
-	if !valid && !sv.negated {
-		sv.addValidationError(CodeMaxLength, "{{field}} must be at most {{max}} characters long",
-			map[string]interface{}{"max": max, "length": length})
-	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeMaxLength, "{{field}} must be more than {{max}} characters long",
-			map[string]interface{}{"max": max, "length": length})
+	if !isValid && !sv.negated {
+		sv.addValidationError("max_length", MsgMaxLength,
+			map[string]interface{}{"max": max})
+	} else if isValid && sv.negated {
+		sv.addValidationError("not_max_length", "validation.not_max_length",
+			map[string]interface{}{"max": max})
 	}
 
 	sv.negated = false
 	return sv
 }
 
-// ExactLength validates that the string length is exactly the specified length.
+// ExactLength validates that the string has exactly the specified number of characters.
 func (sv *StringValidator) ExactLength(length int) *StringValidator {
 	if !sv.shouldValidate() {
 		return sv
 	}
 
-	actualLength := getLength(sv.value)
-	valid := actualLength == length
+	str := toString(sv.value)
+	actualLength := getLength(str)
+	isValid := actualLength == length
 
-	if !valid && !sv.negated {
-		sv.addValidationError(CodeExactLength, "{{field}} must be exactly {{length}} characters long",
-			map[string]interface{}{"length": length, "actual": actualLength})
-	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeExactLength, "{{field}} must not be exactly {{length}} characters long",
-			map[string]interface{}{"length": length, "actual": actualLength})
+	if !isValid && !sv.negated {
+		sv.addValidationError("exact_length", MsgExactLength,
+			map[string]interface{}{"length": length})
+	} else if isValid && sv.negated {
+		sv.addValidationError("not_exact_length", "validation.not_exact_length",
+			map[string]interface{}{"length": length})
 	}
 
 	sv.negated = false
@@ -160,53 +183,58 @@ func (sv *StringValidator) LengthBetween(min, max int) *StringValidator {
 		return sv
 	}
 
-	length := getLength(sv.value)
-	valid := length >= min && length <= max
+	str := toString(sv.value)
+	length := getLength(str)
+	isValid := length >= min && length <= max
 
-	if !valid && !sv.negated {
-		sv.addValidationError(CodeBetween, "{{field}} must be between {{min}} and {{max}} characters long",
-			map[string]interface{}{"min": min, "max": max, "length": length})
-	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeBetween, "{{field}} must not be between {{min}} and {{max}} characters long",
-			map[string]interface{}{"min": min, "max": max, "length": length})
+	if !isValid && !sv.negated {
+		sv.addValidationError("between", MsgBetween,
+			map[string]interface{}{"min": min, "max": max})
+	} else if isValid && sv.negated {
+		sv.addValidationError("not_between", "validation.not_between",
+			map[string]interface{}{"min": min, "max": max})
 	}
 
 	sv.negated = false
 	return sv
 }
 
-// Email validates that the string is a valid email address.
+// =============================================================================
+// Format Validation
+// =============================================================================
+
+// Email validates that the string is a valid email address format.
 func (sv *StringValidator) Email() *StringValidator {
 	if !sv.shouldValidate() {
 		return sv
 	}
 
 	str := toString(sv.value)
-	valid := EmailRegex.MatchString(str)
+	isValid := EmailRegex.MatchString(str)
 
-	if !valid && !sv.negated {
-		sv.addValidationError(CodeEmail, "{{field}} must be a valid email address", nil)
-	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeEmail, "{{field}} must not be a valid email address", nil)
+	if !isValid && !sv.negated {
+		sv.addValidationError("email", MsgEmail, nil)
+	} else if isValid && sv.negated {
+		sv.addValidationError("not_email", "validation.not_email", nil)
 	}
 
 	sv.negated = false
 	return sv
 }
 
-// URL validates that the string is a valid URL.
+// URL validates that the string is a valid URL format.
 func (sv *StringValidator) URL() *StringValidator {
 	if !sv.shouldValidate() {
 		return sv
 	}
 
 	str := toString(sv.value)
-	valid := URLRegex.MatchString(str)
+	isValid := URLRegex.MatchString(str)
 
-	if !valid && !sv.negated {
-		sv.addValidationError(CodeURL, "{{field}} must be a valid URL", nil)
-	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeURL, "{{field}} must not be a valid URL", nil)
+	if !isValid && !sv.negated {
+		sv.addValidationError("url", MsgURL, nil)
+	} else if isValid && sv.negated {
+		sv.addValidationError("not_url", "validation.not_url", nil)
 	}
 
 	sv.negated = false
@@ -223,9 +251,9 @@ func (sv *StringValidator) Numeric() *StringValidator {
 	valid := str != "" && NumericRegex.MatchString(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError(CodeNumeric, "{{field}} must be numeric", nil)
+		sv.addValidationError("numeric", MsgNumeric, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeNumeric, "{{field}} must not be numeric", nil)
+		sv.addValidationError("not_numeric", "validation.not_numeric", nil)
 	}
 
 	sv.negated = false
@@ -242,9 +270,9 @@ func (sv *StringValidator) Alpha() *StringValidator {
 	valid := str != "" && AlphaRegex.MatchString(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError(CodeAlpha, "{{field}} must contain only letters", nil)
+		sv.addValidationError("alpha", MsgAlpha, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeAlpha, "{{field}} must not contain only letters", nil)
+		sv.addValidationError("not_alpha", "validation.not_alpha", nil)
 	}
 
 	sv.negated = false
@@ -261,9 +289,9 @@ func (sv *StringValidator) AlphaNumeric() *StringValidator {
 	valid := str != "" && AlphaNumericRegex.MatchString(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError(CodeAlphaNumeric, "{{field}} must contain only letters and numbers", nil)
+		sv.addValidationError("alpha_numeric", MsgAlphaNumeric, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeAlphaNumeric, "{{field}} must not contain only letters and numbers", nil)
+		sv.addValidationError("not_alpha_numeric", "validation.not_alpha_numeric", nil)
 	}
 
 	sv.negated = false
@@ -280,16 +308,20 @@ func (sv *StringValidator) Regex(pattern *regexp.Regexp) *StringValidator {
 	valid := pattern.MatchString(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError(CodeRegex, "{{field}} format is invalid",
+		sv.addValidationError("regex", MsgRegex,
 			map[string]interface{}{"pattern": pattern.String()})
 	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeRegex, "{{field}} must not match the required format",
+		sv.addValidationError("not_regex", "validation.not_regex",
 			map[string]interface{}{"pattern": pattern.String()})
 	}
 
 	sv.negated = false
 	return sv
 }
+
+// =============================================================================
+// In/NotIn Validation
+// =============================================================================
 
 // In validates that the string is one of the specified values.
 func (sv *StringValidator) In(values ...string) *StringValidator {
@@ -307,10 +339,10 @@ func (sv *StringValidator) In(values ...string) *StringValidator {
 	}
 
 	if !valid && !sv.negated {
-		sv.addValidationError(CodeIn, "{{field}} must be one of: {{values}}",
+		sv.addValidationError("in", "{{field}} must be one of: {{values}}",
 			map[string]interface{}{"values": strings.Join(values, ", ")})
 	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeIn, "{{field}} must not be one of: {{values}}",
+		sv.addValidationError("not_in", "{{field}} must not be one of: {{values}}",
 			map[string]interface{}{"values": strings.Join(values, ", ")})
 	}
 
@@ -334,16 +366,20 @@ func (sv *StringValidator) NotIn(values ...string) *StringValidator {
 	}
 
 	if !valid && !sv.negated {
-		sv.addValidationError(CodeNotIn, "{{field}} must not be one of: {{values}}",
+		sv.addValidationError("not_in", "{{field}} must not be one of: {{values}}",
 			map[string]interface{}{"values": strings.Join(values, ", ")})
 	} else if valid && sv.negated {
-		sv.addValidationError("not_"+CodeNotIn, "{{field}} may be one of: {{values}}",
+		sv.addValidationError("not_not_in", "{{field}} may be one of: {{values}}",
 			map[string]interface{}{"values": strings.Join(values, ", ")})
 	}
 
 	sv.negated = false
 	return sv
 }
+
+// =============================================================================
+// Contains/StartsWith/EndsWith Validation
+// =============================================================================
 
 // Contains validates that the string contains the specified substring.
 func (sv *StringValidator) Contains(substring string) *StringValidator {
@@ -408,6 +444,10 @@ func (sv *StringValidator) EndsWith(suffix string) *StringValidator {
 	return sv
 }
 
+// =============================================================================
+// Case Validation
+// =============================================================================
+
 // Lowercase validates that the string is in lowercase.
 func (sv *StringValidator) Lowercase() *StringValidator {
 	if !sv.shouldValidate() {
@@ -445,6 +485,10 @@ func (sv *StringValidator) Uppercase() *StringValidator {
 	sv.negated = false
 	return sv
 }
+
+// =============================================================================
+// Type Validation
+// =============================================================================
 
 // Integer validates that the string represents a valid integer.
 func (sv *StringValidator) Integer() *StringValidator {
@@ -568,7 +612,7 @@ func validateStringFormat(value, fieldName string, validators ...func(string) bo
 	str := toString(value)
 	for _, validator := range validators {
 		if !validator(str) {
-			return NewValidationError("format", "{{field}} format is invalid", fieldName, value)
+			return erm.NewValidationError("{{field}} format is invalid", fieldName, value)
 		}
 	}
 	return nil

@@ -1,11 +1,17 @@
 // Package vix provides a type-safe, expressive, and extensible validation
 // library for Go. It follows clean architecture principles and integrates
-// seamlessly with the ERM error management package.
+// seamlessly with the ERM centralized error management package for unified error handling
+// and error collection with standard i18n support.
 //
 // Unlike tag-based validation libraries, this package uses function chaining
 // to create readable and maintainable validation rules. The package supports
-// type-safe validation with Go generics, internationalization, conditional
-// validation, and comprehensive error reporting suitable for modern APIs.
+// type-safe validation with Go generics, internationalization using the standard
+// go-i18n package through ERM integration, conditional validation, and comprehensive
+// error reporting suitable for modern APIs.
+//
+// All validation errors are now unified under the erm.Error interface, providing
+// consistent error handling across application and validation layers with
+// on-demand localization support.
 //
 // # Quick Start
 //
@@ -34,7 +40,7 @@
 //	)
 //
 //	if !val.Valid() {
-//		errorMap := val.ToError()
+//		errorMap := val.ErrMap()
 //		jsonBytes, _ := val.ToJSON()
 //		// Returns structured error map suitable for API responses
 //	}
@@ -50,7 +56,8 @@
 //
 // # Integration with Clean Architecture
 //
-// The package integrates seamlessly with onion/clean architecture patterns:
+// The package integrates seamlessly with onion/clean architecture patterns
+// using the unified erm error management system:
 //
 //	func (s *UserService) CreateUser(user User) error {
 //		if err := vix.String(user.Email, "email").Required().Email().Validate(); err != nil {
@@ -59,6 +66,17 @@
 //		// Business logic continues...
 //		return nil
 //	}
+//
+// # Internationalization
+//
+// Error messages are localized using the standard go-i18n package through ERM integration.
+// Set up a localizer in your application initialization:
+//
+//	bundle := erm.CreateDefaultBundle()
+//	localizer := i18n.NewLocalizer(bundle, "en")
+//	erm.SetLocalizer(localizer)
+//
+// All validation errors will then be automatically localized when converted to strings.
 package vix
 
 import (
@@ -68,7 +86,13 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/c3p0-box/utils/erm"
 )
+
+// =============================================================================
+// Interfaces
+// =============================================================================
 
 // Validator defines the interface that all validation rules must implement.
 // It provides a single Validate method that returns an error if validation fails.
@@ -94,15 +118,20 @@ type ValidatorChain interface {
 	Custom(fn func(value interface{}) error) ValidatorChain
 }
 
+// =============================================================================
+// Core Types
+// =============================================================================
+
 // ValidationResult holds the result of a validation operation.
-// It contains the original value, field name, and any validation errors.
+// It contains the original value, field name, and collects validation errors
+// as a slice of erm.Error instances for unified error handling.
+// Internationalization is handled automatically through the erm package.
+// All validation errors use HTTP 400 Bad Request status code.
 type ValidationResult struct {
-	Value      interface{}
-	FieldName  string
-	Errors     []error
-	IsValid    bool
-	locale     *Locale
-	httpStatus int
+	Value     interface{}
+	FieldName string
+	errors    []erm.Error // Slice of validation errors
+	IsValid   bool
 }
 
 // NewValidationResult creates a new ValidationResult with the given value and field name.
@@ -110,40 +139,25 @@ func NewValidationResult(value interface{}, fieldName string) *ValidationResult 
 	if fieldName == "" {
 		fieldName = "value"
 	}
+
 	return &ValidationResult{
-		Value:      value,
-		FieldName:  fieldName,
-		Errors:     []error{},
-		IsValid:    true,
-		locale:     DefaultLocale,
-		httpStatus: http.StatusBadRequest,
+		Value:     value,
+		FieldName: fieldName,
+		errors:    []erm.Error{},
+		IsValid:   true,
 	}
-}
-
-// WithLocale sets the locale for error messages.
-func (vr *ValidationResult) WithLocale(locale *Locale) *ValidationResult {
-	vr.locale = locale
-
-	// Update locale for existing errors
-	for _, err := range vr.Errors {
-		if ve, ok := err.(*ValidationError); ok {
-			ve.locale = locale
-		}
-	}
-
-	return vr
-}
-
-// WithHTTPStatus sets the HTTP status code for validation errors.
-func (vr *ValidationResult) WithHTTPStatus(status int) *ValidationResult {
-	vr.httpStatus = status
-	return vr
 }
 
 // AddError adds a validation error to the result.
 func (vr *ValidationResult) AddError(err error) *ValidationResult {
 	if err != nil {
-		vr.Errors = append(vr.Errors, err)
+		if ermErr, ok := err.(erm.Error); ok {
+			vr.errors = append(vr.errors, ermErr)
+		} else {
+			// Convert regular error to erm.Error
+			ermErr := erm.New(http.StatusBadRequest, err.Error(), err)
+			vr.errors = append(vr.errors, ermErr)
+		}
 		vr.IsValid = false
 	}
 	return vr
@@ -151,114 +165,46 @@ func (vr *ValidationResult) AddError(err error) *ValidationResult {
 
 // Valid returns true if no validation errors occurred.
 func (vr *ValidationResult) Valid() bool {
-	return vr.IsValid
+	return vr.IsValid && len(vr.errors) == 0
 }
 
-// Error returns the first validation error, or nil if validation passed.
+// Error returns the validation error container, or nil if validation passed.
 func (vr *ValidationResult) Error() error {
-	if len(vr.Errors) == 0 {
-		return nil
-	}
-	return vr.Errors[0]
-}
-
-// AllErrors returns all validation errors.
-func (vr *ValidationResult) AllErrors() []error {
-	return vr.Errors
-}
-
-// ToError returns a map of field names to error messages.
-// Returns nil if validation passed, otherwise returns a map with the field name
-// as key and array of error messages as value.
-func (vr *ValidationResult) ToError() map[string][]string {
 	if vr.Valid() {
 		return nil
 	}
 
-	errorMap := make(map[string][]string)
-	var messages []string
+	// Create a container error and add all errors as children
+	container := erm.New(http.StatusBadRequest, "", nil)
+	container.AddErrors(vr.errors)
+	return container
+}
 
-	for _, err := range vr.Errors {
-		messages = append(messages, err.Error())
+// AllErrors returns all validation errors.
+func (vr *ValidationResult) AllErrors() []erm.Error {
+	if vr.errors == nil {
+		return []erm.Error{}
 	}
 
-	if len(messages) > 0 {
-		errorMap[vr.FieldName] = messages
+	return vr.errors
+}
+
+// ErrMap returns a map of field names to error messages.
+// Returns nil if validation passed, otherwise returns the structured error map.
+func (vr *ValidationResult) ErrMap() map[string][]string {
+	if vr.Valid() {
+		return nil
 	}
 
-	return errorMap
+	// Create a container error with all errors and use its ErrMap method
+	container := erm.New(http.StatusBadRequest, "", nil)
+	container.AddErrors(vr.errors)
+	return container.ErrMap()
 }
 
-// ValidationError represents a validation error with template support.
-type ValidationError struct {
-	Code       string
-	Template   string
-	FieldName  string
-	Value      interface{}
-	Params     map[string]interface{}
-	locale     *Locale
-	httpStatus int
-}
-
-// NewValidationError creates a new ValidationError.
-func NewValidationError(code, template, fieldName string, value interface{}) *ValidationError {
-	return &ValidationError{
-		Code:       code,
-		Template:   template,
-		FieldName:  fieldName,
-		Value:      value,
-		Params:     make(map[string]interface{}),
-		locale:     DefaultLocale,
-		httpStatus: http.StatusBadRequest,
-	}
-}
-
-// WithParam adds a parameter for template substitution.
-func (ve *ValidationError) WithParam(key string, value interface{}) *ValidationError {
-	ve.Params[key] = value
-	return ve
-}
-
-// WithLocale sets the locale for error message formatting.
-func (ve *ValidationError) WithLocale(locale *Locale) *ValidationError {
-	ve.locale = locale
-	return ve
-}
-
-// WithHTTPStatus sets the HTTP status code for the error.
-func (ve *ValidationError) WithHTTPStatus(status int) *ValidationError {
-	ve.httpStatus = status
-	return ve
-}
-
-// Error implements the error interface.
-func (ve *ValidationError) Error() string {
-	template := ve.Template
-	if ve.locale != nil {
-		if localized, exists := ve.locale.Messages[ve.Code]; exists {
-			template = localized
-		}
-	}
-
-	return ve.formatTemplate(template)
-}
-
-// formatTemplate formats the error message template with parameters.
-func (ve *ValidationError) formatTemplate(template string) string {
-	result := template
-
-	// Replace field name and value
-	result = strings.ReplaceAll(result, "{{field}}", ve.FieldName)
-	result = strings.ReplaceAll(result, "{{value}}", fmt.Sprintf("%v", ve.Value))
-
-	// Replace custom parameters
-	for key, value := range ve.Params {
-		placeholder := fmt.Sprintf("{{%s}}", key)
-		result = strings.ReplaceAll(result, placeholder, fmt.Sprintf("%v", value))
-	}
-
-	return result
-}
+// =============================================================================
+// Base Functionality
+// =============================================================================
 
 // BaseValidator provides common functionality for all validators.
 type BaseValidator struct {
@@ -309,23 +255,25 @@ func (bv *BaseValidator) shouldValidate() bool {
 }
 
 // addValidationError adds a validation error, handling negation.
-func (bv *BaseValidator) addValidationError(code, template string, params map[string]interface{}) {
+// Uses message keys for internationalization instead of templates.
+func (bv *BaseValidator) addValidationError(code, messageKey string, params map[string]interface{}) {
 	if !bv.shouldValidate() {
 		return
 	}
 
-	err := NewValidationError(code, template, bv.fieldName, bv.value).
-		WithLocale(bv.result.locale).
-		WithHTTPStatus(bv.result.httpStatus)
+	err := erm.NewValidationError(messageKey, bv.fieldName, bv.value)
 
 	for key, value := range params {
-		err.WithParam(key, value)
+		err = err.WithParam(key, value)
 	}
 
 	if bv.negated {
 		// For negated validations, we need to flip the logic
-		err.Code = "not_" + err.Code
-		err.Template = "{{field}} must not " + strings.ToLower(template[strings.Index(template, " ")+1:])
+		negatedMessageKey := "validation.not_" + strings.TrimPrefix(messageKey, "validation.")
+		err = erm.NewValidationError(negatedMessageKey, bv.fieldName, bv.value)
+		for key, value := range params {
+			err = err.WithParam(key, value)
+		}
 	}
 
 	bv.result.AddError(err)
@@ -366,33 +314,61 @@ func (bv *BaseValidator) Custom(fn func(value interface{}) error) *BaseValidator
 		bv.result.AddError(err)
 	} else if bv.negated {
 		// If negated and custom validation passed, it's invalid
-		bv.result.AddError(NewValidationError("custom_negated", "{{field}} must not satisfy custom validation", bv.fieldName, bv.value))
+		bv.result.AddError(erm.NewValidationError("validation.custom_negated", bv.fieldName, bv.value))
 	}
 
 	bv.negated = false
 	return bv
 }
 
-// Common validation codes
+// =============================================================================
+// Constants and Patterns
+// =============================================================================
+
+// Common validation message keys for i18n
 const (
-	CodeRequired     = "required"
-	CodeMinLength    = "min_length"
-	CodeMaxLength    = "max_length"
-	CodeExactLength  = "exact_length"
-	CodeEmail        = "email"
-	CodeURL          = "url"
-	CodeNumeric      = "numeric"
-	CodeAlpha        = "alpha"
-	CodeAlphaNumeric = "alpha_numeric"
-	CodeRegex        = "regex"
-	CodeIn           = "in"
-	CodeNotIn        = "not_in"
-	CodeMin          = "min"
-	CodeMax          = "max"
-	CodeBetween      = "between"
-	CodeAfter        = "after"
-	CodeBefore       = "before"
-	CodeDateFormat   = "date_format"
+	MsgRequired      = "validation.required"
+	MsgEmpty         = "validation.empty"
+	MsgMinLength     = "validation.min_length"
+	MsgMaxLength     = "validation.max_length"
+	MsgExactLength   = "validation.exact_length"
+	MsgLengthBetween = "validation.length_between"
+	MsgEmail         = "validation.email"
+	MsgURL           = "validation.url"
+	MsgNumeric       = "validation.numeric"
+	MsgAlpha         = "validation.alpha"
+	MsgAlphaNumeric  = "validation.alpha_numeric"
+	MsgRegex         = "validation.regex"
+	MsgIn            = "validation.in"
+	MsgNotIn         = "validation.not_in"
+	MsgContains      = "validation.contains"
+	MsgStartsWith    = "validation.starts_with"
+	MsgEndsWith      = "validation.ends_with"
+	MsgLowercase     = "validation.lowercase"
+	MsgUppercase     = "validation.uppercase"
+	MsgInteger       = "validation.integer"
+	MsgFloat         = "validation.float"
+	MsgJSON          = "validation.json"
+	MsgBase64        = "validation.base64"
+	MsgUUID          = "validation.uuid"
+	MsgSlug          = "validation.slug"
+	MsgMin           = "validation.min_value"
+	MsgMax           = "validation.max_value"
+	MsgBetween       = "validation.between"
+	MsgZero          = "validation.zero"
+	MsgEqual         = "validation.equal"
+	MsgGreaterThan   = "validation.greater_than"
+	MsgLessThan      = "validation.less_than"
+	MsgPositive      = "validation.positive"
+	MsgNegative      = "validation.negative"
+	MsgEven          = "validation.even"
+	MsgOdd           = "validation.odd"
+	MsgMultipleOf    = "validation.multiple_of"
+	MsgFinite        = "validation.finite"
+	MsgPrecision     = "validation.precision"
+	MsgAfter         = "validation.after"
+	MsgBefore        = "validation.before"
+	MsgDateFormat    = "validation.date_format"
 )
 
 // Common validation patterns
@@ -403,6 +379,10 @@ var (
 	AlphaRegex        = regexp.MustCompile(`^[a-zA-Z]+$`)
 	AlphaNumericRegex = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
 )
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
 
 // isEmpty checks if a value is considered empty based on its type
 func isEmpty(value interface{}) bool {
@@ -464,6 +444,7 @@ func getLength(value interface{}) int {
 	}
 }
 
+// toString converts a value to string representation
 func toString(value interface{}) string {
 	if value == nil {
 		return ""
@@ -471,6 +452,7 @@ func toString(value interface{}) string {
 	return fmt.Sprintf("%v", value)
 }
 
+// toTime converts a value to time.Time if possible
 func toTime(value interface{}) (time.Time, bool) {
 	switch v := value.(type) {
 	case time.Time:
@@ -490,7 +472,9 @@ func toTime(value interface{}) (time.Time, bool) {
 	}
 }
 
-// Package-level convenience functions for multi-field validation
+// =============================================================================
+// Package-Level Functions
+// =============================================================================
 
 // Is creates a new ValidationOrchestrator and adds the given validators to it.
 // This is a convenience function that allows you to write vix.Is(...) instead of vix.V().Is(...).
@@ -503,7 +487,7 @@ func toTime(value interface{}) (time.Time, bool) {
 //	)
 //
 //	if !val.Valid() {
-//		errorMap := val.ToError()
+//		errorMap := val.ErrMap()
 //		// handle errors
 //	}
 func Is(validators ...Validator) *ValidationOrchestrator {

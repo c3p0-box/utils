@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// =============================================================================
+// Number Type Constraint and Constructor
+// =============================================================================
+
 // Number defines a type constraint for all numeric types
 type Number interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 |
@@ -36,6 +40,10 @@ func Numeric[T Number](value T, fieldName string) *NumberValidator[T] {
 	}
 }
 
+// =============================================================================
+// Chain Methods
+// =============================================================================
+
 // Not negates the next validation rule.
 func (nv *NumberValidator[T]) Not() *NumberValidator[T] {
 	nv.BaseValidator.Not()
@@ -60,6 +68,10 @@ func (nv *NumberValidator[T]) Custom(fn func(value interface{}) error) *NumberVa
 	return nv
 }
 
+// =============================================================================
+// Basic Validation
+// =============================================================================
+
 // Required validates that the number is not zero.
 func (nv *NumberValidator[T]) Required() *NumberValidator[T] {
 	if !nv.shouldValidate() {
@@ -69,9 +81,9 @@ func (nv *NumberValidator[T]) Required() *NumberValidator[T] {
 	isZero := nv.value == 0
 
 	if isZero && !nv.negated {
-		nv.addValidationError(CodeRequired, "{{field}} is required", nil)
+		nv.addValidationError("required", MsgRequired, nil)
 	} else if !isZero && nv.negated {
-		nv.addValidationError("not_"+CodeRequired, "{{field}} must be zero", nil)
+		nv.addValidationError("not_required", "validation.must_be_zero", nil)
 	}
 
 	nv.negated = false
@@ -105,10 +117,10 @@ func (nv *NumberValidator[T]) Min(min T) *NumberValidator[T] {
 	valid := nv.value >= min
 
 	if !valid && !nv.negated {
-		nv.addValidationError(CodeMin, "{{field}} must be at least {{min}}",
+		nv.addValidationError("min", MsgMin,
 			map[string]interface{}{"min": min, "value": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_"+CodeMin, "{{field}} must be less than {{min}}",
+		nv.addValidationError("not_min", "validation.not_min_value",
 			map[string]interface{}{"min": min, "value": nv.value})
 	}
 
@@ -125,10 +137,10 @@ func (nv *NumberValidator[T]) Max(max T) *NumberValidator[T] {
 	valid := nv.value <= max
 
 	if !valid && !nv.negated {
-		nv.addValidationError(CodeMax, "{{field}} must be at most {{max}}",
+		nv.addValidationError("max", MsgMax,
 			map[string]interface{}{"max": max, "value": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_"+CodeMax, "{{field}} must be more than {{max}}",
+		nv.addValidationError("not_max", "validation.not_max_value",
 			map[string]interface{}{"max": max, "value": nv.value})
 	}
 
@@ -145,10 +157,10 @@ func (nv *NumberValidator[T]) Between(min, max T) *NumberValidator[T] {
 	valid := nv.value >= min && nv.value <= max
 
 	if !valid && !nv.negated {
-		nv.addValidationError(CodeBetween, "{{field}} must be between {{min}} and {{max}}",
+		nv.addValidationError("between", "{{field}} must be between {{min}} and {{max}}",
 			map[string]interface{}{"min": min, "max": max, "value": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_"+CodeBetween, "{{field}} must not be between {{min}} and {{max}}",
+		nv.addValidationError("not_between", "{{field}} must not be between {{min}} and {{max}}",
 			map[string]interface{}{"min": min, "max": max, "value": nv.value})
 	}
 
@@ -267,10 +279,10 @@ func (nv *NumberValidator[T]) In(values ...T) *NumberValidator[T] {
 	}
 
 	if !valid && !nv.negated {
-		nv.addValidationError(CodeIn, "{{field}} must be one of: {{values}}",
+		nv.addValidationError("in", "{{field}} must be one of: {{values}}",
 			map[string]interface{}{"values": formatValues(values)})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_"+CodeIn, "{{field}} must not be one of: {{values}}",
+		nv.addValidationError("not_in", "{{field}} must not be one of: {{values}}",
 			map[string]interface{}{"values": formatValues(values)})
 	}
 
@@ -293,10 +305,10 @@ func (nv *NumberValidator[T]) NotIn(values ...T) *NumberValidator[T] {
 	}
 
 	if !valid && !nv.negated {
-		nv.addValidationError(CodeNotIn, "{{field}} must not be one of: {{values}}",
+		nv.addValidationError("not_in", "{{field}} must not be one of: {{values}}",
 			map[string]interface{}{"values": formatValues(values)})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_"+CodeNotIn, "{{field}} may be one of: {{values}}",
+		nv.addValidationError("not_not_in", "{{field}} may be one of: {{values}}",
 			map[string]interface{}{"values": formatValues(values)})
 	}
 
@@ -457,7 +469,9 @@ func formatValues[T Number](values []T) string {
 	return result
 }
 
-// Convenience functions for common numeric types
+// =============================================================================
+// Convenience Functions
+// =============================================================================
 
 // Int creates a NumberValidator for int values.
 func Int(value int, fieldName string) *NumberValidator[int] {

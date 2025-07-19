@@ -4,14 +4,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/c3p0-box/utils/erm"
+	"github.com/nicksnyder/go-i18n/v2/i18n"
 )
 
-// ValidationOrchestrator manages multiple field validations and provides
-// comprehensive error reporting with support for namespacing and indexing.
+// ValidationOrchestrator manages multiple validators and provides a unified interface
+// for validating multiple fields and creating comprehensive error reports.
+// It supports namespace organization for nested structures and arrays.
+//
+// The orchestrator collects validation results from multiple validators and
+// provides methods to check validity, retrieve errors, and generate structured
+// output suitable for API responses. All error messages are automatically
+// localized through the ERM package's i18n system.
+//
+// The orchestrator uses an erm.Error container internally to collect and manage
+// all validation errors, leveraging ERM's error collection capabilities for
+// efficient error handling and reporting.
 type ValidationOrchestrator struct {
-	fieldResults map[string]*ValidationResult
-	fieldOrder   []string
-	locale       *Locale
+	fieldResults map[string]*ValidationResult // Field name to validation result mapping
+	fieldOrder   []string                     // Preserve field order
+	err          erm.Error                    // Container for all validation errors
 }
 
 // NewValidationOrchestrator creates a new ValidationOrchestrator.
@@ -19,7 +32,7 @@ func NewValidationOrchestrator() *ValidationOrchestrator {
 	return &ValidationOrchestrator{
 		fieldResults: make(map[string]*ValidationResult),
 		fieldOrder:   make([]string, 0),
-		locale:       DefaultLocale,
+		err:          erm.New(400, "", nil),
 	}
 }
 
@@ -28,7 +41,7 @@ func V() *ValidationOrchestrator {
 	return NewValidationOrchestrator()
 }
 
-// Is adds a validation result to the orchestrator.
+// Is adds multiple validators to the orchestrator.
 func (vo *ValidationOrchestrator) Is(validators ...Validator) *ValidationOrchestrator {
 	for _, validator := range validators {
 		result := validator.Result()
@@ -55,21 +68,8 @@ func (vo *ValidationOrchestrator) InRow(namespace string, index int, orchestrato
 	return vo
 }
 
-// WithLocale sets the locale for all validation results.
-func (vo *ValidationOrchestrator) WithLocale(locale *Locale) *ValidationOrchestrator {
-	vo.locale = locale
-	for _, result := range vo.fieldResults {
-		result.WithLocale(locale)
-	}
-	return vo
-}
-
 // addResult adds a validation result to the orchestrator.
 func (vo *ValidationOrchestrator) addResult(fieldName string, result *ValidationResult) {
-	if result.locale == nil {
-		result.WithLocale(vo.locale)
-	}
-
 	if _, exists := vo.fieldResults[fieldName]; !exists {
 		vo.fieldOrder = append(vo.fieldOrder, fieldName)
 	}
@@ -78,12 +78,26 @@ func (vo *ValidationOrchestrator) addResult(fieldName string, result *Validation
 
 // Valid returns true if all validations passed.
 func (vo *ValidationOrchestrator) Valid() bool {
-	for _, result := range vo.fieldResults {
+	// Clear old errors by creating a new container
+	vo.err = erm.New(400, "", nil)
+
+	// Collect errors from all field results, preserving namespaced field names
+	for _, fieldName := range vo.fieldOrder {
+		result := vo.fieldResults[fieldName]
 		if !result.Valid() {
-			return false
+			// Update field names to match the namespaced field name managed by orchestrator
+			errors := result.AllErrors()
+			namespacedErrors := make([]erm.Error, 0, len(errors))
+			for _, err := range errors {
+				// Create a new error with the namespaced field name
+				namespacedErr := err.WithFieldName(fieldName)
+				namespacedErrors = append(namespacedErrors, namespacedErr)
+			}
+			vo.err.AddErrors(namespacedErrors)
 		}
 	}
-	return true
+
+	return !vo.err.HasErrors()
 }
 
 // IsValid returns true if the specific field validation passed.
@@ -91,62 +105,42 @@ func (vo *ValidationOrchestrator) IsValid(fieldName string) bool {
 	if result, exists := vo.fieldResults[fieldName]; exists {
 		return result.Valid()
 	}
-	return true // Field not found means no validation was performed, so it's valid
+	return true // If field doesn't exist, consider it valid
 }
 
-// ToError returns a structured error map suitable for JSON serialization.
-// Returns nil if all validations passed.
-func (vo *ValidationOrchestrator) ToError() map[string][]string {
+// ErrMap returns a map of field names to error messages using the default localizer.
+// Now leverages ERM's localized error map functionality while preserving
+// the namespaced field names managed by the orchestrator.
+func (vo *ValidationOrchestrator) ErrMap() map[string][]string {
 	if vo.Valid() {
 		return nil
 	}
 
-	errorMap := make(map[string][]string)
-
-	for _, fieldName := range vo.fieldOrder {
-		result := vo.fieldResults[fieldName]
-		if !result.Valid() {
-			var messages []string
-			for _, err := range result.AllErrors() {
-				messages = append(messages, err.Error())
-			}
-			if len(messages) > 0 {
-				errorMap[fieldName] = messages
-			}
-		}
-	}
-
-	return errorMap
+	// Use ERM's localized error map with namespaced field names
+	return vo.err.ErrMap()
 }
 
-// ToJSON returns the error map as JSON bytes.
-func (vo *ValidationOrchestrator) ToJSON() ([]byte, error) {
-	errorMap := vo.ToError()
-	if errorMap == nil {
-		return []byte("{}"), nil
+// LocalizedErrMap returns a map of field names to localized error messages
+// using the provided localizer. This provides full internationalization support
+// while preserving the orchestrator's namespaced field structure.
+func (vo *ValidationOrchestrator) LocalizedErrMap(localizer *i18n.Localizer) map[string][]string {
+	if vo.Valid() {
+		return nil
 	}
-	return json.MarshalIndent(errorMap, "", "  ")
+
+	// Use ERM's localized error map with custom localizer
+	return vo.err.LocalizedErrMap(localizer)
 }
 
-// Error returns the first error found, or nil if all validations passed.
+// Error returns a single erm.Error containing all validation errors as children.
 func (vo *ValidationOrchestrator) Error() error {
-	for _, fieldName := range vo.fieldOrder {
-		result := vo.fieldResults[fieldName]
-		if !result.Valid() {
-			return result.Error()
-		}
+	// Call Valid() to ensure errors are collected from field results
+	if vo.Valid() {
+		return nil
 	}
-	return nil
-}
 
-// AllErrors returns all errors from all fields.
-func (vo *ValidationOrchestrator) AllErrors() []error {
-	var allErrors []error
-	for _, fieldName := range vo.fieldOrder {
-		result := vo.fieldResults[fieldName]
-		allErrors = append(allErrors, result.AllErrors()...)
-	}
-	return allErrors
+	// Return the error container directly
+	return vo.err
 }
 
 // FieldNames returns all field names that have been validated.
@@ -159,10 +153,20 @@ func (vo *ValidationOrchestrator) GetFieldResult(fieldName string) *ValidationRe
 	return vo.fieldResults[fieldName]
 }
 
-// String returns a human-readable string representation of all errors.
+// ToJSON returns the error map as JSON bytes.
+func (vo *ValidationOrchestrator) ToJSON() ([]byte, error) {
+	if vo.Valid() {
+		return []byte("{}"), nil
+	}
+
+	errorMap := vo.ErrMap()
+	return json.Marshal(errorMap)
+}
+
+// String returns a string representation of the validation state.
 func (vo *ValidationOrchestrator) String() string {
 	if vo.Valid() {
-		return "validation passed"
+		return "ValidationOrchestrator: Valid"
 	}
 
 	var messages []string
@@ -170,10 +174,10 @@ func (vo *ValidationOrchestrator) String() string {
 		result := vo.fieldResults[fieldName]
 		if !result.Valid() {
 			for _, err := range result.AllErrors() {
-				messages = append(messages, err.Error())
+				messages = append(messages, fmt.Sprintf("%s: %s", fieldName, err.Error()))
 			}
 		}
 	}
 
-	return strings.Join(messages, "; ")
+	return fmt.Sprintf("ValidationOrchestrator: Invalid (%s)", strings.Join(messages, ", "))
 }

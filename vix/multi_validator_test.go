@@ -4,7 +4,19 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/c3p0-box/utils/erm"
 )
+
+// setupLocalizer sets up the default localizer for tests
+// This is a simplified version that uses the erm package's test helper
+func setupLocalizer() {
+	erm.SetupTestLocalizer()
+}
+
+// =============================================================================
+// ValidationOrchestrator Core Tests
+// =============================================================================
 
 func TestValidationOrchestrator_Is(t *testing.T) {
 	tests := []struct {
@@ -64,23 +76,12 @@ func TestValidationOrchestrator_Is(t *testing.T) {
 			orchestrator := Is(tt.validators...)
 
 			if orchestrator.Valid() != tt.expectValid {
-				t.Errorf("expected valid=%v, got valid=%v", tt.expectValid, orchestrator.Valid())
+				t.Errorf("expected Valid() = %v, got %v", tt.expectValid, orchestrator.Valid())
 			}
 
-			if tt.expectError {
-				if orchestrator.Error() == nil {
-					t.Error("expected error but got nil")
-				}
-				if len(orchestrator.AllErrors()) == 0 {
-					t.Error("expected errors but got empty slice")
-				}
-			} else {
-				if orchestrator.Error() != nil {
-					t.Errorf("expected no error but got: %v", orchestrator.Error())
-				}
-				if len(orchestrator.AllErrors()) != 0 {
-					t.Errorf("expected no errors but got: %v", orchestrator.AllErrors())
-				}
+			hasError := orchestrator.Error() != nil
+			if hasError != tt.expectError {
+				t.Errorf("expected error presence = %v, got %v", tt.expectError, hasError)
 			}
 		})
 	}
@@ -108,13 +109,15 @@ func TestValidationOrchestrator_IsValid(t *testing.T) {
 }
 
 func TestValidationOrchestrator_ToError(t *testing.T) {
+	setupLocalizer() // Set up localizer for tests
+
 	t.Run("valid orchestrator returns nil", func(t *testing.T) {
 		orchestrator := Is(
 			String("test@example.com", "email").Required().Email(),
 			Int(25, "age").Required().Min(18),
 		)
 
-		errorMap := orchestrator.ToError()
+		errorMap := orchestrator.ErrMap()
 		if errorMap != nil {
 			t.Errorf("expected nil error map but got: %v", errorMap)
 		}
@@ -126,7 +129,7 @@ func TestValidationOrchestrator_ToError(t *testing.T) {
 			Int(16, "age").Required().Min(18),
 		)
 
-		errorMap := orchestrator.ToError()
+		errorMap := orchestrator.ErrMap()
 		if errorMap == nil {
 			t.Fatal("expected error map but got nil")
 		}
@@ -207,7 +210,7 @@ func TestValidationOrchestrator_In(t *testing.T) {
 		t.Error("address.street should be valid")
 	}
 
-	errorMap := orchestrator.ToError()
+	errorMap := orchestrator.ErrMap()
 	if _, exists := errorMap["address.name"]; !exists {
 		t.Error("error map should contain 'address.name' key")
 	}
@@ -254,7 +257,7 @@ func TestValidationOrchestrator_InRow(t *testing.T) {
 		t.Error("addresses[1].street should be invalid")
 	}
 
-	errorMap := orchestrator.ToError()
+	errorMap := orchestrator.ErrMap()
 	if _, exists := errorMap["addresses[0].name"]; !exists {
 		t.Error("error map should contain 'addresses[0].name' key")
 	}
@@ -266,20 +269,6 @@ func TestValidationOrchestrator_InRow(t *testing.T) {
 	}
 	if _, exists := errorMap["addresses[1].name"]; exists {
 		t.Error("error map should not contain 'addresses[1].name' key")
-	}
-}
-
-func TestValidationOrchestrator_WithLocale(t *testing.T) {
-	orchestrator := Is(
-		String("", "email").Required(),
-	).WithLocale(SpanishLocale)
-
-	errorMap := orchestrator.ToError()
-	if _, exists := errorMap["email"]; !exists {
-		t.Error("error map should contain 'email' key")
-	}
-	if !strings.Contains(errorMap["email"][0], "email es requerido") {
-		t.Errorf("expected Spanish message, got: %v", errorMap["email"])
 	}
 }
 
@@ -340,13 +329,15 @@ func TestValidationOrchestrator_GetFieldResult(t *testing.T) {
 }
 
 func TestValidationOrchestrator_String(t *testing.T) {
+	setupLocalizer() // Set up localizer for tests
+
 	t.Run("valid orchestrator", func(t *testing.T) {
 		orchestrator := Is(
 			String("test@example.com", "email").Required().Email(),
 		)
 
-		if orchestrator.String() != "validation passed" {
-			t.Errorf("expected 'validation passed', got: %s", orchestrator.String())
+		if orchestrator.String() != "ValidationOrchestrator: Valid" {
+			t.Errorf("expected 'ValidationOrchestrator: Valid', got: %s", orchestrator.String())
 		}
 	})
 
@@ -363,43 +354,56 @@ func TestValidationOrchestrator_String(t *testing.T) {
 		if !strings.Contains(result, "age must be at least 18") {
 			t.Errorf("expected 'age must be at least 18' in result: %s", result)
 		}
-		if !strings.Contains(result, ";") {
-			t.Errorf("expected ';' separator in result: %s", result)
+		if !strings.Contains(result, ", ") {
+			t.Errorf("expected ', ' separator in result: %s", result)
 		}
 	})
 }
 
-func TestValidationOrchestrator_AllErrors(t *testing.T) {
+func TestValidationOrchestrator_Error(t *testing.T) {
+	setupLocalizer() // Set up localizer for tests
+
 	orchestrator := Is(
 		String("", "email").Required(),
 		Int(16, "age").Required().Min(18),
 	)
 
-	errors := orchestrator.AllErrors()
-	if len(errors) != 2 {
-		t.Errorf("expected 2 errors, got %d", len(errors))
+	// Test Error() returns a container error with all child errors
+	err := orchestrator.Error()
+	if err == nil {
+		t.Error("expected error to be returned")
 	}
 
-	errorMessages := make([]string, len(errors))
-	for i, err := range errors {
-		errorMessages[i] = err.Error()
-	}
+	// Test that the error is an erm.Error with child errors
+	if ermErr, ok := err.(erm.Error); ok {
+		childErrors := ermErr.AllErrors()
+		if len(childErrors) != 2 {
+			t.Errorf("expected 2 child errors, got %d", len(childErrors))
+		}
 
-	hasEmailError := false
-	hasAgeError := false
-	for _, msg := range errorMessages {
-		if strings.Contains(msg, "email is required") {
-			hasEmailError = true
+		errorMessages := make([]string, len(childErrors))
+		for i, err := range childErrors {
+			errorMessages[i] = err.Error()
 		}
-		if strings.Contains(msg, "age must be at least 18") {
-			hasAgeError = true
+
+		hasEmailError := false
+		hasAgeError := false
+		for _, msg := range errorMessages {
+			if strings.Contains(msg, "email is required") {
+				hasEmailError = true
+			}
+			if strings.Contains(msg, "age must be at least 18") {
+				hasAgeError = true
+			}
 		}
-	}
-	if !hasEmailError {
-		t.Error("expected 'email is required' error message")
-	}
-	if !hasAgeError {
-		t.Error("expected 'age must be at least 18' error message")
+		if !hasEmailError {
+			t.Error("expected 'email is required' error message")
+		}
+		if !hasAgeError {
+			t.Error("expected 'age must be at least 18' error message")
+		}
+	} else {
+		t.Error("expected error to be an erm.Error")
 	}
 }
 
@@ -415,7 +419,7 @@ func TestValidationOrchestrator_ComplexExample(t *testing.T) {
 		t.Error("orchestrator should be invalid")
 	}
 
-	errorMap := orchestrator.ToError()
+	errorMap := orchestrator.ErrMap()
 	if _, exists := errorMap["full_name"]; !exists {
 		t.Error("error map should contain 'full_name' key")
 	}
@@ -471,7 +475,7 @@ func TestValidationOrchestrator_NestedStructExample(t *testing.T) {
 		t.Error("orchestrator should be invalid")
 	}
 
-	errorMap := orchestrator.ToError()
+	errorMap := orchestrator.ErrMap()
 	if _, exists := errorMap["address.name"]; !exists {
 		t.Error("error map should contain 'address.name' key")
 	}
@@ -530,7 +534,7 @@ func TestValidationOrchestrator_ArrayExample(t *testing.T) {
 		t.Error("orchestrator should be invalid")
 	}
 
-	errorMap := orchestrator.ToError()
+	errorMap := orchestrator.ErrMap()
 	if _, exists := errorMap["addresses[0].name"]; !exists {
 		t.Error("error map should contain 'addresses[0].name' key")
 	}
@@ -581,7 +585,7 @@ func TestValidationOrchestrator_NumericTypes(t *testing.T) {
 	if !orchestrator.Valid() {
 		t.Error("orchestrator should be valid")
 	}
-	if orchestrator.ToError() != nil {
+	if orchestrator.ErrMap() != nil {
 		t.Error("error map should be nil")
 	}
 
@@ -600,17 +604,14 @@ func TestValidationOrchestrator_EmptyOrchestrator(t *testing.T) {
 	if orchestrator.Error() != nil {
 		t.Error("empty orchestrator should have no error")
 	}
-	if len(orchestrator.AllErrors()) != 0 {
-		t.Error("empty orchestrator should have no errors")
-	}
-	if orchestrator.ToError() != nil {
+	if orchestrator.ErrMap() != nil {
 		t.Error("empty orchestrator should have nil error map")
 	}
 	if len(orchestrator.FieldNames()) != 0 {
 		t.Error("empty orchestrator should have no field names")
 	}
-	if orchestrator.String() != "validation passed" {
-		t.Errorf("expected 'validation passed', got: %s", orchestrator.String())
+	if orchestrator.String() != "ValidationOrchestrator: Valid" {
+		t.Errorf("expected 'ValidationOrchestrator: Valid', got: %s", orchestrator.String())
 	}
 }
 
@@ -625,9 +626,7 @@ func TestValidationOrchestrator_NewValidationOrchestrator(t *testing.T) {
 	if orchestrator.fieldOrder == nil {
 		t.Error("fieldOrder should not be nil")
 	}
-	if orchestrator.locale != DefaultLocale {
-		t.Error("locale should be DefaultLocale")
-	}
+	// Note: locale field removed - now handled globally through erm.SetLocalizer()
 }
 
 func TestValidationOrchestrator_FieldOrder(t *testing.T) {
@@ -681,7 +680,7 @@ func TestPackageLevelFunctions(t *testing.T) {
 		if !orchestrator.Valid() {
 			t.Error("orchestrator should be valid")
 		}
-		if orchestrator.ToError() != nil {
+		if orchestrator.ErrMap() != nil {
 			t.Error("error map should be nil")
 		}
 	})
@@ -733,7 +732,7 @@ func TestPackageLevelFunctions(t *testing.T) {
 			t.Error("orchestrator should be invalid")
 		}
 
-		errorMap := orchestrator.ToError()
+		errorMap := orchestrator.ErrMap()
 		if errorMap == nil {
 			t.Error("error map should not be nil")
 		}
@@ -744,4 +743,36 @@ func TestPackageLevelFunctions(t *testing.T) {
 			t.Error("error map should contain 'age' key")
 		}
 	})
+}
+
+func TestValidationOrchestrator_LocalizedErrMap(t *testing.T) {
+	// Test valid orchestrator returns nil
+	validOrchestrator := Is(
+		String("test@example.com", "email").Required().Email(),
+		String("ValidPassword123", "password").Required().MinLength(8),
+	)
+
+	localizedMap := validOrchestrator.LocalizedErrMap(nil)
+	if localizedMap != nil {
+		t.Fatalf("Valid orchestrator should return nil localized error map, got: %v", localizedMap)
+	}
+
+	// Test invalid orchestrator returns proper localized error map
+	invalidOrchestrator := Is(
+		String("", "email").Required().Email(),
+		String("123", "password").Required().MinLength(8),
+	)
+
+	localizedMap = invalidOrchestrator.LocalizedErrMap(nil)
+	if localizedMap == nil {
+		t.Fatal("Invalid orchestrator should return a localized error map")
+	}
+
+	// Should have errors for both fields
+	if _, exists := localizedMap["email"]; !exists {
+		t.Fatal("Localized error map should contain email field errors")
+	}
+	if _, exists := localizedMap["password"]; !exists {
+		t.Fatal("Localized error map should contain password field errors")
+	}
 }

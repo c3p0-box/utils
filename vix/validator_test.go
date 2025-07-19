@@ -7,7 +7,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/c3p0-box/utils/erm"
 )
+
+// =============================================================================
+// String Validator Tests - Basic Validation
+// =============================================================================
 
 func TestStringValidatorRequired(t *testing.T) {
 	tests := []struct {
@@ -47,8 +53,7 @@ func TestStringValidatorNotRequired(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sv := String(tt.value, "test")
-			err := sv.Not().Required().Validate()
+			err := String(tt.value, "test").Not().Required().Validate()
 			if tt.shouldErr && err == nil {
 				t.Error("expected error but got none")
 			}
@@ -58,6 +63,10 @@ func TestStringValidatorNotRequired(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// String Validator Tests - Length/Range Validation
+// =============================================================================
 
 func TestStringValidatorMinLength(t *testing.T) {
 	tests := []struct {
@@ -467,7 +476,7 @@ func TestStringValidatorCustom(t *testing.T) {
 	customValidator := func(value interface{}) error {
 		str := value.(string)
 		if strings.Contains(str, "forbidden") {
-			return NewValidationError("forbidden", "{{field}} contains forbidden word", "test", value)
+			return erm.NewValidationError("{{field}} contains forbidden word", "test", value)
 		}
 		return nil
 	}
@@ -744,33 +753,26 @@ func TestNumberValidatorMultipleOf(t *testing.T) {
 }
 
 func TestLocalization(t *testing.T) {
+	erm.SetupTestLocalizer() // Use shared test helper
+
 	// Test default locale
-	err := String("", "name").Required().Validate()
+	englishResult := String("", "name").Required().Result()
+	err := englishResult.Error()
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "name is required") {
-		t.Errorf("expected default english message, got: %v", err)
+		t.Errorf("expected english message, got: %v", err)
 	}
 
-	// Test Spanish locale
-	spanishResult := String("", "nombre").Required().Result().WithLocale(SpanishLocale)
-	err = spanishResult.Error()
+	// Test field name substitution with different field name
+	result := String("", "nombre").Required().Result()
+	err = result.Error()
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "nombre es requerido") {
-		t.Errorf("expected spanish message, got: %v", err)
-	}
-
-	// Test French locale
-	frenchResult := String("", "nom").Required().Result().WithLocale(FrenchLocale)
-	err = frenchResult.Error()
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "nom est requis") {
-		t.Errorf("expected french message, got: %v", err)
+	if !strings.Contains(err.Error(), "nombre is required") {
+		t.Errorf("expected message with field name, got: %v", err)
 	}
 }
 
@@ -931,7 +933,9 @@ func TestGenericNumberValidation(t *testing.T) {
 }
 
 func TestErrorMessages(t *testing.T) {
-	// Test error message contains field name
+	erm.SetupTestLocalizer() // Use shared test helper
+
+	// Test with field name
 	err := String("", "username").Required().Validate()
 	if err == nil {
 		t.Fatal("expected error")
@@ -981,6 +985,8 @@ func TestComplexValidationScenarios(t *testing.T) {
 
 // TestStringValidatorEmpty tests the Empty validation rule
 func TestStringValidatorEmpty(t *testing.T) {
+	erm.SetupTestLocalizer() // Use shared test helper
+
 	tests := []struct {
 		name      string
 		value     string
@@ -1612,146 +1618,9 @@ func TestNumberTypeValidators(t *testing.T) {
 	})
 }
 
-// TestLocaleFeatures tests all locale-related functionality
-func TestLocaleFeatures(t *testing.T) {
-	t.Run("NewLocale", func(t *testing.T) {
-		locale := NewLocale("test", "Test Locale")
-		if locale.Code != "test" {
-			t.Errorf("expected code 'test', got %s", locale.Code)
-		}
-		if locale.Name != "Test Locale" {
-			t.Errorf("expected name 'Test Locale', got %s", locale.Name)
-		}
-	})
-
-	t.Run("SetMessage", func(t *testing.T) {
-		locale := NewLocale("test", "Test Locale")
-		locale.SetMessage("required", "Field is required")
-		if locale.Messages["required"] != "Field is required" {
-			t.Error("message not set correctly")
-		}
-	})
-
-	t.Run("GetMessage", func(t *testing.T) {
-		locale := NewLocale("test", "Test Locale")
-		locale.SetMessage("required", "Field is required")
-		msg := locale.GetMessage("required")
-		if msg != "Field is required" {
-			t.Errorf("expected 'Field is required', got %s", msg)
-		}
-	})
-
-	t.Run("HasMessage", func(t *testing.T) {
-		locale := NewLocale("test", "Test Locale")
-		locale.SetMessage("required", "Field is required")
-		if !locale.HasMessage("required") {
-			t.Error("expected HasMessage to return true")
-		}
-		if locale.HasMessage("nonexistent") {
-			t.Error("expected HasMessage to return false")
-		}
-	})
-
-	t.Run("Merge", func(t *testing.T) {
-		locale1 := NewLocale("test1", "Test Locale 1")
-		locale1.SetMessage("required", "Field is required")
-		locale2 := NewLocale("test2", "Test Locale 2")
-		locale2.SetMessage("email", "Invalid email")
-
-		locale1.Merge(locale2)
-
-		if !locale1.HasMessage("required") {
-			t.Error("expected original message to be preserved")
-		}
-		if !locale1.HasMessage("email") {
-			t.Error("expected merged message to be added")
-		}
-	})
-
-	t.Run("Clone", func(t *testing.T) {
-		locale := NewLocale("test", "Test Locale")
-		locale.SetMessage("required", "Field is required")
-
-		clone := locale.Clone()
-
-		if clone.Code != locale.Code {
-			t.Error("expected clone to have same code")
-		}
-		if clone.Name != locale.Name {
-			t.Error("expected clone to have same name")
-		}
-		if !clone.HasMessage("required") {
-			t.Error("expected clone to have same messages")
-		}
-	})
-
-	t.Run("FormatMessage", func(t *testing.T) {
-		locale := NewLocale("test", "Test Locale")
-		locale.SetMessage("min_length", "{{field}} must be at least {{min}} characters")
-
-		formatted := locale.FormatMessage("{{field}} must be at least {{min}} characters", map[string]interface{}{
-			"field": "username",
-			"min":   5,
-		})
-
-		expected := "username must be at least 5 characters"
-		if formatted != expected {
-			t.Errorf("expected '%s', got '%s'", expected, formatted)
-		}
-	})
-}
-
-// TestLocaleRegistry tests the locale registry functionality
-func TestLocaleRegistry(t *testing.T) {
-	registry := NewLocaleRegistry()
-
-	t.Run("Register and Get", func(t *testing.T) {
-		locale := NewLocale("test", "Test Locale")
-		registry.Register(locale)
-
-		retrieved := registry.Get("test")
-		if retrieved == nil {
-			t.Error("expected to retrieve registered locale")
-		}
-		if retrieved.Code != "test" {
-			t.Errorf("expected code 'test', got %s", retrieved.Code)
-		}
-	})
-
-	t.Run("SetDefault and GetDefault", func(t *testing.T) {
-		locale := NewLocale("test", "Test Locale")
-		registry.Register(locale)
-		registry.SetDefault(locale)
-
-		defaultLocale := registry.GetDefault()
-		if defaultLocale.Code != "test" {
-			t.Errorf("expected default code 'test', got %s", defaultLocale.Code)
-		}
-	})
-
-	t.Run("List", func(t *testing.T) {
-		locale1 := NewLocale("test1", "Test Locale 1")
-		locale2 := NewLocale("test2", "Test Locale 2")
-		registry.Register(locale1)
-		registry.Register(locale2)
-
-		locales := registry.List()
-		if len(locales) < 2 {
-			t.Error("expected at least 2 locales")
-		}
-	})
-}
-
 // TestValidationResultMethods tests ValidationResult methods
 func TestValidationResultMethods(t *testing.T) {
-	t.Run("WithHTTPStatus", func(t *testing.T) {
-		result := NewValidationResult("test", "field")
-		result.WithHTTPStatus(422)
-
-		if result.httpStatus != 422 {
-			t.Errorf("expected HTTP status 422, got %d", result.httpStatus)
-		}
-	})
+	setupLocalizer() // Set up localizer for tests
 
 	t.Run("NewValidationResult with empty field name", func(t *testing.T) {
 		result := NewValidationResult("test", "")
@@ -1763,17 +1632,17 @@ func TestValidationResultMethods(t *testing.T) {
 	t.Run("ToError method", func(t *testing.T) {
 		// Test valid result returns nil
 		result := NewValidationResult("test", "field")
-		errorMap := result.ToError()
+		errorMap := result.ErrMap()
 		if errorMap != nil {
 			t.Error("expected nil error map for valid result")
 		}
 
 		// Test result with single error
 		result = NewValidationResult("", "email")
-		err := NewValidationError("required", "{{field}} is required", "email", "")
+		err := erm.NewValidationError("validation.required", "email", "")
 		result.AddError(err)
 
-		errorMap = result.ToError()
+		errorMap = result.ErrMap()
 		if errorMap == nil {
 			t.Fatal("expected error map, got nil")
 		}
@@ -1790,13 +1659,13 @@ func TestValidationResultMethods(t *testing.T) {
 
 		// Test result with multiple errors using manual error creation
 		result = NewValidationResult("abc", "password")
-		err1 := NewValidationError("min_length", "{{field}} must be at least {{min}} characters long", "password", "abc")
-		err1.WithParam("min", 8)
-		err2 := NewValidationError("custom", "{{field}} must contain special characters", "password", "abc")
+		err1 := erm.NewValidationError("validation.min_length", "password", "abc")
+		err1 = err1.WithParam("min", 8)
+		err2 := erm.NewValidationError("validation.invalid", "password", "abc")
 		result.AddError(err1)
 		result.AddError(err2)
 
-		errorMap = result.ToError()
+		errorMap = result.ErrMap()
 		if errorMap == nil {
 			t.Fatal("expected error map, got nil")
 		}
@@ -1811,14 +1680,14 @@ func TestValidationResultMethods(t *testing.T) {
 			if errors[0] != "password must be at least 8 characters long" {
 				t.Errorf("expected 'password must be at least 8 characters long', got %s", errors[0])
 			}
-			if errors[1] != "password must contain special characters" {
-				t.Errorf("expected 'password must contain special characters', got %s", errors[1])
+			if errors[1] != "password is invalid" {
+				t.Errorf("expected 'password is invalid', got %s", errors[1])
 			}
 		}
 
 		// Test result with actual validator errors
 		result = String("a", "password").Required().MinLength(8).Result()
-		errorMap = result.ToError()
+		errorMap = result.ErrMap()
 		if errorMap == nil {
 			t.Fatal("expected error map, got nil")
 		}
@@ -1838,35 +1707,20 @@ func TestValidationResultMethods(t *testing.T) {
 	})
 }
 
-// TestValidationErrorMethods tests ValidationError methods
+// TestValidationErrorMethods tests validation error methods now provided by erm.Error
 func TestValidationErrorMethods(t *testing.T) {
 	t.Run("WithParam", func(t *testing.T) {
-		err := NewValidationError("test", "Test message", "field", "value")
-		err.WithParam("param1", "value1")
+		err := erm.NewValidationError("Test message", "field", "value")
+		err = err.WithParam("test", "value")
 
-		if err.Params["param1"] != "value1" {
+		if err.Params()["test"] != "value" {
 			t.Error("expected parameter to be set")
 		}
 	})
 
-	t.Run("WithLocale", func(t *testing.T) {
-		err := NewValidationError("test", "Test message", "field", "value")
-		locale := NewLocale("test", "Test Locale")
-		err.WithLocale(locale)
-
-		if err.locale != locale {
-			t.Error("expected locale to be set")
-		}
-	})
-
-	t.Run("WithHTTPStatus", func(t *testing.T) {
-		err := NewValidationError("test", "Test message", "field", "value")
-		err.WithHTTPStatus(422)
-
-		if err.httpStatus != 422 {
-			t.Errorf("expected HTTP status 422, got %d", err.httpStatus)
-		}
-	})
+	// Note: Internationalization is now handled globally through erm.SetLocalizer()
+	// WithLocale method has been removed - use erm.SetLocalizer() during app initialization
+	// ValidationCode functionality has been removed since vix always uses 400 status
 }
 
 // TestCustomValidationFunction tests custom validation functions
@@ -1884,7 +1738,7 @@ func TestCustomValidationFunction(t *testing.T) {
 
 	t.Run("Custom validation failure", func(t *testing.T) {
 		customFunc := func(value interface{}) error {
-			return NewValidationError("custom", "Custom error", "field", value)
+			return erm.NewValidationError("Custom error", "field", value)
 		}
 
 		err := String("test", "field").Custom(customFunc).Validate()
@@ -2049,55 +1903,21 @@ func TestComplexValidationChains(t *testing.T) {
 	})
 }
 
-// TestInternationalizationIntegration tests i18n integration
-func TestInternationalizationIntegration(t *testing.T) {
-	t.Run("Spanish locale", func(t *testing.T) {
-		result := String("", "nombre").Required().Result().WithLocale(SpanishLocale)
-		err := result.Error()
-		if err == nil {
-			t.Error("expected validation error")
-		}
-		if !strings.Contains(err.Error(), "es requerido") {
-			t.Errorf("expected Spanish error message, got: %v", err)
-		}
-	})
-
-	t.Run("French locale", func(t *testing.T) {
-		result := String("", "nom").Required().Result().WithLocale(FrenchLocale)
-		err := result.Error()
-		if err == nil {
-			t.Error("expected validation error")
-		}
-		if !strings.Contains(err.Error(), "est requis") {
-			t.Errorf("expected French error message, got: %v", err)
-		}
-	})
-
-	t.Run("German locale", func(t *testing.T) {
-		result := String("", "name").Required().Result().WithLocale(GermanLocale)
-		err := result.Error()
-		if err == nil {
-			t.Error("expected validation error")
-		}
-		if !strings.Contains(err.Error(), "ist erforderlich") {
-			t.Errorf("expected German error message, got: %v", err)
-		}
-	})
-}
-
 // TestValidatorToError tests ToError() method integration with validators
 func TestValidatorToError(t *testing.T) {
+	setupLocalizer() // Set up localizer for tests
+
 	t.Run("String validator ToError", func(t *testing.T) {
 		// Test valid string
 		result := String("test@example.com", "email").Required().Email().Result()
-		errorMap := result.ToError()
+		errorMap := result.ErrMap()
 		if errorMap != nil {
 			t.Error("expected nil error map for valid string")
 		}
 
 		// Test invalid string - single error
 		result = String("", "email").Required().Result()
-		errorMap = result.ToError()
+		errorMap = result.ErrMap()
 		if errorMap == nil {
 			t.Fatal("expected error map, got nil")
 		}
@@ -2114,7 +1934,7 @@ func TestValidatorToError(t *testing.T) {
 
 		// Test invalid string - multiple errors
 		result = String("a", "password").Required().MinLength(8).MaxLength(128).Result()
-		errorMap = result.ToError()
+		errorMap = result.ErrMap()
 		if errorMap == nil {
 			t.Fatal("expected error map, got nil")
 		}
@@ -2133,14 +1953,14 @@ func TestValidatorToError(t *testing.T) {
 	t.Run("Number validator ToError", func(t *testing.T) {
 		// Test valid number
 		result := Int(25, "age").Required().Min(18).Max(100).Result()
-		errorMap := result.ToError()
+		errorMap := result.ErrMap()
 		if errorMap != nil {
 			t.Error("expected nil error map for valid number")
 		}
 
 		// Test invalid number - single error
 		result = Int(0, "age").Required().Result()
-		errorMap = result.ToError()
+		errorMap = result.ErrMap()
 		if errorMap == nil {
 			t.Fatal("expected error map, got nil")
 		}
@@ -2157,7 +1977,7 @@ func TestValidatorToError(t *testing.T) {
 
 		// Test invalid number - multiple errors through chaining
 		result = Int(10, "score").Required().Min(50).Max(100).Result()
-		errorMap = result.ToError()
+		errorMap = result.ErrMap()
 		if errorMap == nil {
 			t.Fatal("expected error map, got nil")
 		}
@@ -2170,36 +1990,6 @@ func TestValidatorToError(t *testing.T) {
 			t.Errorf("expected 1 error message, got %d", len(errors))
 		} else if !strings.Contains(errors[0], "must be at least 50") {
 			t.Errorf("expected min value error, got %s", errors[0])
-		}
-	})
-
-	t.Run("ToError with localization", func(t *testing.T) {
-		// Test with Spanish locale
-		result := String("", "email").Required().Result().WithLocale(SpanishLocale)
-		errorMap := result.ToError()
-		if errorMap == nil {
-			t.Fatal("expected error map, got nil")
-		}
-		if errors, exists := errorMap["email"]; !exists {
-			t.Error("expected 'email' field in error map")
-		} else if len(errors) != 1 {
-			t.Errorf("expected 1 error message, got %d", len(errors))
-		} else if !strings.Contains(errors[0], "es requerido") {
-			t.Errorf("expected Spanish error message, got %s", errors[0])
-		}
-
-		// Test with French locale
-		result = String("", "nom").Required().Result().WithLocale(FrenchLocale)
-		errorMap = result.ToError()
-		if errorMap == nil {
-			t.Fatal("expected error map, got nil")
-		}
-		if errors, exists := errorMap["nom"]; !exists {
-			t.Error("expected 'nom' field in error map")
-		} else if len(errors) != 1 {
-			t.Errorf("expected 1 error message, got %d", len(errors))
-		} else if !strings.Contains(errors[0], "est requis") {
-			t.Errorf("expected French error message, got %s", errors[0])
 		}
 	})
 
@@ -2218,7 +2008,7 @@ func TestValidatorToError(t *testing.T) {
 
 		for _, tc := range testCases {
 			result := String(tc.value, tc.fieldName).Required().Result()
-			errorMap := result.ToError()
+			errorMap := result.ErrMap()
 			if errorMap == nil {
 				t.Fatalf("expected error map for field %s, got nil", tc.fieldName)
 			}
@@ -2282,42 +2072,6 @@ func TestLargeNumberEdgeCases(t *testing.T) {
 	})
 }
 
-// TestLocaleEdgeCases tests edge cases in localization
-func TestLocaleEdgeCases(t *testing.T) {
-	t.Run("Locale with missing messages", func(t *testing.T) {
-		incompleteLocale := NewLocale("incomplete", "Incomplete Locale")
-		// Don't set the "required" message
-
-		result := String("", "test").Required().Result().WithLocale(incompleteLocale)
-		err := result.Error()
-		if err == nil {
-			t.Error("Expected error for missing field")
-		}
-
-		// Should fall back to default message when locale message is missing
-		errorMsg := err.Error()
-		if !strings.Contains(errorMsg, "required") {
-			t.Errorf("Expected fallback message, got: %s", errorMsg)
-		}
-	})
-
-	t.Run("Locale parameter substitution", func(t *testing.T) {
-		customLocale := NewLocale("custom", "Custom Locale")
-		customLocale.SetMessage(CodeMinLength, "{{field}} debe tener al menos {{min}} caracteres")
-
-		result := String("hi", "password").MinLength(8).Result().WithLocale(customLocale)
-		err := result.Error()
-		if err == nil {
-			t.Error("Expected validation error")
-		}
-
-		errorMsg := err.Error()
-		if !strings.Contains(errorMsg, "debe tener al menos 8") {
-			t.Errorf("Expected localized message with parameters, got: %s", errorMsg)
-		}
-	})
-}
-
 // TestValidationChaining tests complex validation chains
 func TestValidationChaining(t *testing.T) {
 	t.Run("Complex email validation chain", func(t *testing.T) {
@@ -2364,6 +2118,8 @@ func TestValidationChaining(t *testing.T) {
 
 // TestErrorMessageFormatting tests error message formatting edge cases
 func TestErrorMessageFormatting(t *testing.T) {
+	setupLocalizer() // Set up localizer for tests
+
 	t.Run("Error message with special characters", func(t *testing.T) {
 		fieldName := "field_with_underscores"
 		err := String("", fieldName).Required().Validate()
@@ -2401,6 +2157,179 @@ func TestMemoryEfficiency(t *testing.T) {
 				t.Errorf("Validation %d failed: %v", i, err)
 				break
 			}
+		}
+	})
+}
+
+// TestNumberValidatorCustom tests the Custom method for NumberValidator
+func TestNumberValidatorCustom(t *testing.T) {
+	t.Run("Custom validation success", func(t *testing.T) {
+		customFunc := func(value interface{}) error {
+			return nil // Always pass
+		}
+
+		err := Int(42, "test").Custom(customFunc).Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("Custom validation failure", func(t *testing.T) {
+		customFunc := func(value interface{}) error {
+			return erm.NewValidationError("validation.custom", "test", value)
+		}
+
+		err := Int(42, "test").Custom(customFunc).Validate()
+		if err == nil {
+			t.Error("expected custom validation to fail")
+		}
+	})
+
+	t.Run("Custom validation with nil function", func(t *testing.T) {
+		err := Int(42, "test").Custom(nil).Validate()
+		if err != nil {
+			t.Errorf("unexpected error with nil custom function: %v", err)
+		}
+	})
+}
+
+// TestNumberValidatorNegationEdgeCases tests negation with various number validators
+func TestNumberValidatorNegationEdgeCases(t *testing.T) {
+	t.Run("Not.Zero", func(t *testing.T) {
+		// Should pass when value is not zero
+		err := Int(5, "test").Not().Zero().Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Should fail when value is zero
+		err = Int(0, "test").Not().Zero().Validate()
+		if err == nil {
+			t.Error("expected error for Not().Zero() with zero value")
+		}
+	})
+
+	t.Run("Not.Even", func(t *testing.T) {
+		// Should pass for odd numbers
+		err := Int(5, "test").Not().Even().Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Should fail for even numbers
+		err = Int(4, "test").Not().Even().Validate()
+		if err == nil {
+			t.Error("expected error for Not().Even() with even value")
+		}
+	})
+
+	t.Run("Not.Positive", func(t *testing.T) {
+		// Should pass for negative/zero
+		err := Int(-5, "test").Not().Positive().Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Should fail for positive
+		err = Int(5, "test").Not().Positive().Validate()
+		if err == nil {
+			t.Error("expected error for Not().Positive() with positive value")
+		}
+	})
+}
+
+// TestStringValidatorNegationEdgeCases tests negation with string validators
+func TestStringValidatorNegationEdgeCases(t *testing.T) {
+	t.Run("Not.Empty", func(t *testing.T) {
+		// Should pass when not empty
+		err := String("hello", "test").Not().Empty().Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Should fail when empty
+		err = String("", "test").Not().Empty().Validate()
+		if err == nil {
+			t.Error("expected error for Not().Empty() with empty value")
+		}
+	})
+
+	t.Run("Not.Numeric", func(t *testing.T) {
+		// Should pass for non-numeric
+		err := String("hello", "test").Not().Numeric().Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Should fail for numeric
+		err = String("12345", "test").Not().Numeric().Validate()
+		if err == nil {
+			t.Error("expected error for Not().Numeric() with numeric value")
+		}
+	})
+
+	t.Run("Not.Alpha", func(t *testing.T) {
+		// Should pass for non-alpha
+		err := String("hello123", "test").Not().Alpha().Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Should fail for alpha-only
+		err = String("hello", "test").Not().Alpha().Validate()
+		if err == nil {
+			t.Error("expected error for Not().Alpha() with alpha value")
+		}
+	})
+}
+
+// TestValidatorEdgeCasesForCoverage tests edge cases to improve coverage
+func TestValidatorEdgeCasesForCoverage(t *testing.T) {
+	t.Run("formatValues with different types", func(t *testing.T) {
+		// Test formatValues function indirectly through In() validation
+		err := Int(10, "test").In(1, 2, 3, 4, 5).Validate()
+		if err == nil {
+			t.Error("expected error for value not in list")
+		}
+
+		// Check that we got an error - the exact format may vary based on localization
+		errorMsg := err.Error()
+		if !strings.Contains(errorMsg, "validation error for field") {
+			t.Errorf("Error message should indicate validation error, got: %s", errorMsg)
+		}
+	})
+
+	t.Run("Finite with special float values", func(t *testing.T) {
+		// Test with positive infinity
+		err := Float64(math.Inf(1), "test").Finite().Validate()
+		if err == nil {
+			t.Error("expected error for positive infinity")
+		}
+
+		// Test with negative infinity
+		err = Float64(math.Inf(-1), "test").Finite().Validate()
+		if err == nil {
+			t.Error("expected error for negative infinity")
+		}
+
+		// Test with NaN
+		err = Float64(math.NaN(), "test").Finite().Validate()
+		if err == nil {
+			t.Error("expected error for NaN")
+		}
+	})
+
+	t.Run("Precision with various decimal places", func(t *testing.T) {
+		// Test precision calculation edge cases
+		err := Float64(1.000000001, "test").Precision(8).Validate()
+		if err == nil {
+			t.Error("expected error for precision exceeding limit")
+		}
+
+		// Test with zero precision
+		err = Float64(3.0, "test").Precision(0).Validate()
+		if err != nil {
+			t.Errorf("unexpected error for integer with zero precision: %v", err)
 		}
 	})
 }
