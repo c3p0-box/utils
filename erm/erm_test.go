@@ -1024,6 +1024,22 @@ func TestValidationErrorConstructors(t *testing.T) {
 			t.Fatalf("Error() = %q, should contain 'at most 100'", err.Error())
 		}
 	})
+
+	t.Run("DuplicateError", func(t *testing.T) {
+		err := DuplicateError("email", "user@example.com")
+		if err.Error() != "email already exists, another record has the same value" {
+			t.Fatalf("Error() = %q, want expected message", err.Error())
+		}
+		if err.MessageKey() != "validation.duplicate" {
+			t.Fatalf("MessageKey() = %q, want 'validation.duplicate'", err.MessageKey())
+		}
+		if err.FieldName() != "email" {
+			t.Fatalf("FieldName() = %q, want 'email'", err.FieldName())
+		}
+		if err.Value() != "user@example.com" {
+			t.Fatalf("Value() = %v, want 'user@example.com'", err.Value())
+		}
+	})
 }
 
 // =============================================================================
@@ -1206,12 +1222,12 @@ func (m *MockLocale) Messages() map[string]string {
 	return m.messages
 }
 
-// TestDeprecatedFunctions tests the deprecated functions for coverage completeness
-func TestDeprecatedFunctions(t *testing.T) {
+// TestValidationErrorFunctions tests validation error creation methods
+func TestValidationErrorFunctions(t *testing.T) {
 	InitializeDefaultLocalizer()
 
-	t.Run("ValidationError_deprecated_function", func(t *testing.T) {
-		err := ValidationError("validation.required", "email", "")
+	t.Run("NewValidationError_function", func(t *testing.T) {
+		err := NewValidationError("validation.required", "email", "")
 
 		if err.Code() != 400 {
 			t.Fatalf("Code() = %d, want 400", err.Code())
@@ -1230,8 +1246,11 @@ func TestDeprecatedFunctions(t *testing.T) {
 		}
 	})
 
-	t.Run("ValidationErrorWithStatus_deprecated_function", func(t *testing.T) {
-		err := ValidationErrorWithStatus(422, "validation.custom", "field", "value")
+	t.Run("ValidationError_with_custom_status", func(t *testing.T) {
+		err := New(422, "", nil).
+			WithMessageKey("validation.custom").
+			WithFieldName("field").
+			WithValue("value")
 
 		if err.Code() != 422 {
 			t.Fatalf("Code() = %d, want 422", err.Code())

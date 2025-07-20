@@ -804,21 +804,6 @@ func NewValidationError(messageKey, fieldName string, value interface{}) Error {
 		WithValue(value)
 }
 
-// ValidationError is an alias for NewValidationError for backward compatibility.
-// Deprecated: Use NewValidationError directly.
-func ValidationError(messageKey, fieldName string, value interface{}) Error {
-	return NewValidationError(messageKey, fieldName, value)
-}
-
-// ValidationErrorWithStatus creates a validation error with a custom HTTP status code.
-// This allows validation errors to use different HTTP status codes (e.g., 422 for validation errors).
-func ValidationErrorWithStatus(status int, messageKey, fieldName string, value interface{}) Error {
-	return New(status, "", nil).
-		WithMessageKey(messageKey).
-		WithFieldName(fieldName).
-		WithValue(value)
-}
-
 // Common validation error constructors using standard message keys.
 // These provide convenient creation of typical validation errors with
 // proper internationalization support.
@@ -855,4 +840,9 @@ func MinValueError(fieldName string, value interface{}, min interface{}) Error {
 func MaxValueError(fieldName string, value interface{}, max interface{}) Error {
 	return NewValidationError("validation.max_value", fieldName, value).
 		WithParam("max", max)
+}
+
+// DuplicateError creates a "duplicate" validation error for unique constraint violations.
+func DuplicateError(fieldName string, value interface{}) Error {
+	return NewValidationError("validation.duplicate", fieldName, value)
 }

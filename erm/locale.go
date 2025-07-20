@@ -83,6 +83,10 @@ func CreateDefaultBundle() *i18n.Bundle {
 		Other: "{{.field}} must not be empty",
 	})
 	bundle.AddMessages(language.English, &i18n.Message{
+		ID:    "validation.duplicate",
+		Other: "{{.field}} already exists, another record has the same value",
+	})
+	bundle.AddMessages(language.English, &i18n.Message{
 		ID:    "error.multiple",
 		Other: "multiple errors: {{.errors}}",
 	})
