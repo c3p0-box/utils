@@ -846,3 +846,8 @@ func MaxValueError(fieldName string, value interface{}, max interface{}) Error {
 func DuplicateError(fieldName string, value interface{}) Error {
 	return NewValidationError("validation.duplicate", fieldName, value)
 }
+
+// InvalidError creates an "invalid" validation error for general invalid values.
+func InvalidError(fieldName string, value interface{}) Error {
+	return NewValidationError("validation.invalid", fieldName, value)
+}

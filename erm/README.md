@@ -67,6 +67,7 @@ err := erm.RequiredError("email", "")
 err := erm.MinLengthError("password", "123", 8)
 err := erm.EmailError("email", "invalid-email")
 err := erm.DuplicateError("email", "user@example.com")
+err := erm.InvalidError("format", "invalid-data")
 ```
 
 ### Internationalization Setup
@@ -194,6 +195,7 @@ Use message keys instead of templates: `NewValidationError("validation.required"
 - `MinLengthError(fieldName string, value interface{}, min int) Error`
 - `EmailError(fieldName string, value interface{}) Error`
 - `DuplicateError(fieldName string, value interface{}) Error`
+- `InvalidError(fieldName string, value interface{}) Error`
 
 ### Error Interface
 

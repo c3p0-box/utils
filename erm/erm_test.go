@@ -1040,6 +1040,22 @@ func TestValidationErrorConstructors(t *testing.T) {
 			t.Fatalf("Value() = %v, want 'user@example.com'", err.Value())
 		}
 	})
+
+	t.Run("InvalidError", func(t *testing.T) {
+		err := InvalidError("format", "invalid-data")
+		if err.Error() != "format value is invalid" {
+			t.Fatalf("Error() = %q, want expected message", err.Error())
+		}
+		if err.MessageKey() != "validation.invalid" {
+			t.Fatalf("MessageKey() = %q, want 'validation.invalid'", err.MessageKey())
+		}
+		if err.FieldName() != "format" {
+			t.Fatalf("FieldName() = %q, want 'format'", err.FieldName())
+		}
+		if err.Value() != "invalid-data" {
+			t.Fatalf("Value() = %v, want 'invalid-data'", err.Value())
+		}
+	})
 }
 
 // =============================================================================

@@ -72,7 +72,7 @@ func CreateDefaultBundle() *i18n.Bundle {
 	})
 	bundle.AddMessages(language.English, &i18n.Message{
 		ID:    "validation.invalid",
-		Other: "{{.field}} is invalid",
+		Other: "{{.field}} value is invalid",
 	})
 	bundle.AddMessages(language.English, &i18n.Message{
 		ID:    "validation.empty",

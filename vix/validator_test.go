@@ -1680,8 +1680,8 @@ func TestValidationResultMethods(t *testing.T) {
 			if errors[0] != "password must be at least 8 characters long" {
 				t.Errorf("expected 'password must be at least 8 characters long', got %s", errors[0])
 			}
-			if errors[1] != "password is invalid" {
-				t.Errorf("expected 'password is invalid', got %s", errors[1])
+			if errors[1] != "password value is invalid" {
+				t.Errorf("expected 'password value is invalid', got %s", errors[1])
 			}
 		}
 
