@@ -135,17 +135,16 @@ err := erm.RequiredError("email", "")
 fmt.Println(err.Error()) // "email is required"
 
 // Custom localization with different languages
-spanishLocalizer := erm.GetLocalizer(language.Spanish)
-localizedMsg := err.LocalizedError(spanishLocalizer)
+localizedMsg := err.LocalizedError(language.Spanish)
 fmt.Println(localizedMsg) // Currently returns English since Spanish bundle uses English fallback
 
-// For custom localizer with actual Spanish messages
-customSpanishLocalizer := createCustomSpanishLocalizer() // Your implementation
-spanishMsg := err.LocalizedError(customSpanishLocalizer)
-fmt.Println(spanishMsg) // "email es requerido"
+// For custom languages, extend the GetLocalizer system with your own bundles
+// The system will automatically use English fallback for any language
+spanishMsg := err.LocalizedError(language.Spanish)
+fmt.Println(spanishMsg) // "email is required" (English fallback)
 
 // Structured errors for APIs
-errorMap := err.LocalizedErrMap(spanishLocalizer)
+errorMap := err.LocalizedErrMap(language.Spanish)
 // Returns: {"email": ["email is required"]}
 
 // Convenience method using default English localizer
@@ -175,9 +174,9 @@ errors := []erm.Error{
 container2.AddErrors(errors)
 
 // Get localized error map for API responses
-errorMap := container.ErrMap() // Uses English localizer
-// Or with specific localizer
-errorMap = container.LocalizedErrMap(erm.GetLocalizer(language.Spanish))
+errorMap := container.ErrMap() // Uses English
+// Or with specific language
+errorMap = container.LocalizedErrMap(language.Spanish)
 
 // Format: {"email": ["email is required"], "password": ["password must be at least 8 characters long"]}
 ```
@@ -222,9 +221,9 @@ spanishLocalizer := erm.GetLocalizer(language.Spanish)
 
 ```go
 type Error interface {
-    Error() string                              // Localized with English localizer
-    LocalizedError(*i18n.Localizer) string     // Localized with specific localizer
-    LocalizedErrMap(*i18n.Localizer) map[string][]string
+    Error() string                              // Localized with English
+    LocalizedError(language.Tag) string        // Localized with specific language
+    LocalizedErrMap(language.Tag) map[string][]string
     
     MessageKey() string                         // i18n message key
     FieldName() string

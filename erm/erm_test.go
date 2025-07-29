@@ -668,9 +668,8 @@ func TestLocalization(t *testing.T) {
 	t.Run("Custom localizer", func(t *testing.T) {
 		err := NewValidationError("validation.required", "email", "")
 
-		// Create a custom localizer (this would be Spanish in real usage)
-		customLocalizer := GetLocalizer(language.English) // For this test, just use English
-		msg := err.LocalizedError(customLocalizer)
+		// Test localization with English language tag
+		msg := err.LocalizedError(language.English)
 
 		if msg != "email is required" {
 			t.Errorf("Expected localized message, got: %s", msg)
@@ -693,7 +692,7 @@ func TestLocalization(t *testing.T) {
 func TestLocalizedErrMap(t *testing.T) {
 	t.Run("Single error localized", func(t *testing.T) {
 		err := NewValidationError("validation.required", "email", "")
-		errorMap := err.LocalizedErrMap(GetLocalizer(language.English))
+		errorMap := err.LocalizedErrMap(language.English)
 
 		if errorMap == nil {
 			t.Fatal("Expected error map, got nil")
@@ -715,7 +714,7 @@ func TestLocalizedErrMap(t *testing.T) {
 
 		container.AddError(err1)
 		container.AddError(err2)
-		errorMap := container.LocalizedErrMap(GetLocalizer(language.English))
+		errorMap := container.LocalizedErrMap(language.English)
 
 		if len(errorMap) != 2 {
 			t.Fatalf("Expected 2 fields in error map, got %d", len(errorMap))
@@ -730,11 +729,10 @@ func TestLocalizedErrMap(t *testing.T) {
 		}
 	})
 
-	t.Run("Custom localizer", func(t *testing.T) {
+	t.Run("Custom language", func(t *testing.T) {
 		err := NewValidationError("validation.required", "email", "")
-		customLocalizer := GetLocalizer(language.English) // For testing, use English
 
-		errorMap := err.LocalizedErrMap(customLocalizer)
+		errorMap := err.LocalizedErrMap(language.English)
 		if errorMap == nil {
 			t.Fatal("Expected error map, got nil")
 		}
@@ -1128,11 +1126,11 @@ func TestNilHandling(t *testing.T) {
 		t.Error("ErrMap() should return nil for nil receiver")
 	}
 
-	if nilErr.LocalizedError(nil) != "<nil>" {
+	if nilErr.LocalizedError(language.English) != "<nil>" {
 		t.Error("LocalizedError() should return '<nil>' for nil receiver")
 	}
 
-	if nilErr.LocalizedErrMap(nil) != nil {
+	if nilErr.LocalizedErrMap(language.English) != nil {
 		t.Error("LocalizedErrMap() should return nil for nil receiver")
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/c3p0-box/utils/erm"
-	"github.com/nicksnyder/go-i18n/v2/i18n"
+	"golang.org/x/text/language"
 )
 
 // ValidationOrchestrator manages multiple validators and provides a unified interface
@@ -121,15 +121,15 @@ func (vo *ValidationOrchestrator) ErrMap() map[string][]string {
 }
 
 // LocalizedErrMap returns a map of field names to localized error messages
-// using the provided localizer. This provides full internationalization support
+// for the specified language. This provides full internationalization support
 // while preserving the orchestrator's namespaced field structure.
-func (vo *ValidationOrchestrator) LocalizedErrMap(localizer *i18n.Localizer) map[string][]string {
+func (vo *ValidationOrchestrator) LocalizedErrMap(tag language.Tag) map[string][]string {
 	if vo.Valid() {
 		return nil
 	}
 
-	// Use ERM's localized error map with custom localizer
-	return vo.err.LocalizedErrMap(localizer)
+	// Use ERM's localized error map with the specified language
+	return vo.err.LocalizedErrMap(tag)
 }
 
 // Error returns a single erm.Error containing all validation errors as children.

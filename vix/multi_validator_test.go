@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/c3p0-box/utils/erm"
+	"golang.org/x/text/language"
 )
 
 // setupLocalizer sets up the default localizer for tests
@@ -751,7 +752,7 @@ func TestValidationOrchestrator_LocalizedErrMap(t *testing.T) {
 		String("ValidPassword123", "password").Required().MinLength(8),
 	)
 
-	localizedMap := validOrchestrator.LocalizedErrMap(nil)
+	localizedMap := validOrchestrator.LocalizedErrMap(language.English)
 	if localizedMap != nil {
 		t.Fatalf("Valid orchestrator should return nil localized error map, got: %v", localizedMap)
 	}
@@ -762,7 +763,7 @@ func TestValidationOrchestrator_LocalizedErrMap(t *testing.T) {
 		String("123", "password").Required().MinLength(8),
 	)
 
-	localizedMap = invalidOrchestrator.LocalizedErrMap(nil)
+	localizedMap = invalidOrchestrator.LocalizedErrMap(language.English)
 	if localizedMap == nil {
 		t.Fatal("Invalid orchestrator should return a localized error map")
 	}

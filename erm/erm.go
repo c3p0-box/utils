@@ -50,13 +50,10 @@
 // for internationalization. Messages are resolved on-demand when Error() or
 // ToError() methods are called, using the configured default localizer.
 //
-//	// Get localizers for different languages
-//	englishLocalizer := erm.GetLocalizer(language.English)
-//	spanishLocalizer := erm.GetLocalizer(language.Spanish)
-//
-//	// Get localized error messages
-//	localizedMsg := err.LocalizedError(spanishLocalizer)
-//	localizedMap := err.LocalizedErrMap(spanishLocalizer)
+//	// Get localized error messages for different languages
+//	englishMsg := err.LocalizedError(language.English)
+//	spanishMsg := err.LocalizedError(language.Spanish)
+//	localizedMap := err.LocalizedErrMap(language.Spanish)
 //
 // All functions handle nil errors gracefully and are safe for concurrent use.
 // The package serves as a unified error management system that eliminates the need
@@ -136,11 +133,11 @@ type Error interface {
 	// HasErrors returns true if this error contains child errors.
 	HasErrors() bool
 
-	// LocalizedError returns the localized error message using the provided localizer
-	LocalizedError(*i18n.Localizer) string
+	// LocalizedError returns the localized error message for the specified language
+	LocalizedError(language.Tag) string
 
-	// LocalizedErrMap returns a map of field names to localized error messages
-	LocalizedErrMap(*i18n.Localizer) map[string][]string
+	// LocalizedErrMap returns a map of field names to localized error messages for the specified language
+	LocalizedErrMap(language.Tag) map[string][]string
 
 	// ErrMap returns a map of field names to error messages using the default localizer
 	ErrMap() map[string][]string
@@ -259,7 +256,7 @@ func (e *StackError) Error() string {
 
 	// If we have a message key or child errors, use localized error formatting
 	if e.messageKey != "" || len(e.errors) > 0 {
-		return e.LocalizedError(GetLocalizer(language.English))
+		return e.LocalizedError(language.English)
 	}
 
 	// Otherwise use the existing logic for non-localized errors
@@ -457,26 +454,25 @@ func (e *StackError) HasErrors() bool {
 // =============================================================================
 
 // ErrMap returns a map of field names to error messages using the default English localizer.
-// Returns nil if no errors exist. Convenience method for LocalizedErrMap(GetLocalizer(language.English)).
+// Returns nil if no errors exist. Convenience method for LocalizedErrMap(language.English).
 func (e *StackError) ErrMap() map[string][]string {
-	return e.LocalizedErrMap(GetLocalizer(language.English))
+	return e.LocalizedErrMap(language.English)
 }
 
-// LocalizedError returns the error message using the provided localizer.
-// Falls back to default localizer if provided localizer is nil.
-func (e *StackError) LocalizedError(localizer *i18n.Localizer) string {
+// LocalizedError returns the error message for the specified language.
+func (e *StackError) LocalizedError(tag language.Tag) string {
 	if e == nil {
 		return "<nil>"
 	}
 
 	// Handle child errors
 	if len(e.errors) > 0 {
-		return e.formatChildErrors(localizer)
+		return e.formatChildErrors(tag)
 	}
 
 	// Handle message key localization
 	if e.messageKey != "" {
-		if msg := e.localizeMessage(localizer); msg != "" {
+		if msg := e.localizeMessage(tag); msg != "" {
 			return msg
 		}
 	}
@@ -486,11 +482,11 @@ func (e *StackError) LocalizedError(localizer *i18n.Localizer) string {
 }
 
 // formatChildErrors handles formatting multiple child errors.
-func (e *StackError) formatChildErrors(localizer *i18n.Localizer) string {
+func (e *StackError) formatChildErrors(tag language.Tag) string {
 	var messages []string
 	for _, err := range e.errors {
 		if err != nil {
-			messages = append(messages, err.LocalizedError(localizer))
+			messages = append(messages, err.LocalizedError(tag))
 		}
 	}
 
@@ -500,15 +496,15 @@ func (e *StackError) formatChildErrors(localizer *i18n.Localizer) string {
 	case 1:
 		return messages[0]
 	default:
-		return e.formatMultipleErrors(messages, localizer)
+		return e.formatMultipleErrors(messages, tag)
 	}
 }
 
 // formatMultipleErrors formats multiple error messages.
-func (e *StackError) formatMultipleErrors(messages []string, localizer *i18n.Localizer) string {
-	usedLocalizer := e.getEffectiveLocalizer(localizer)
-	if usedLocalizer != nil {
-		return usedLocalizer.MustLocalize(&i18n.LocalizeConfig{
+func (e *StackError) formatMultipleErrors(messages []string, tag language.Tag) string {
+	localizer := GetLocalizer(tag)
+	if localizer != nil {
+		return localizer.MustLocalize(&i18n.LocalizeConfig{
 			MessageID: "error.multiple",
 			TemplateData: map[string]interface{}{
 				"errors": strings.Join(messages, "; "),
@@ -519,14 +515,14 @@ func (e *StackError) formatMultipleErrors(messages []string, localizer *i18n.Loc
 }
 
 // localizeMessage attempts to localize a message using the message key.
-func (e *StackError) localizeMessage(localizer *i18n.Localizer) string {
-	usedLocalizer := e.getEffectiveLocalizer(localizer)
-	if usedLocalizer == nil {
+func (e *StackError) localizeMessage(tag language.Tag) string {
+	localizer := GetLocalizer(tag)
+	if localizer == nil {
 		return ""
 	}
 
 	templateData := e.buildTemplateData()
-	msg, err := usedLocalizer.Localize(&i18n.LocalizeConfig{
+	msg, err := localizer.Localize(&i18n.LocalizeConfig{
 		MessageID:    e.messageKey,
 		TemplateData: templateData,
 	})
@@ -554,13 +550,7 @@ func (e *StackError) buildTemplateData() map[string]interface{} {
 	return templateData
 }
 
-// getEffectiveLocalizer returns the provided localizer or falls back to English.
-func (e *StackError) getEffectiveLocalizer(localizer *i18n.Localizer) *i18n.Localizer {
-	if localizer != nil {
-		return localizer
-	}
-	return GetLocalizer(language.English)
-}
+// getEffectiveLocalizer has been removed - replaced with direct GetLocalizer calls
 
 // getFallbackMessage provides fallback error messages when localization fails.
 func (e *StackError) getFallbackMessage() string {
@@ -580,8 +570,8 @@ func (e *StackError) getFallbackMessage() string {
 }
 
 // LocalizedErrMap returns a map of field names to localized error messages
-// using the provided localizer. Falls back to default localizer if nil.
-func (e *StackError) LocalizedErrMap(localizer *i18n.Localizer) map[string][]string {
+// for the specified language.
+func (e *StackError) LocalizedErrMap(tag language.Tag) map[string][]string {
 	if e == nil {
 		return nil
 	}
@@ -600,7 +590,7 @@ func (e *StackError) LocalizedErrMap(localizer *i18n.Localizer) map[string][]str
 				fieldName = "error" // Fallback for errors without field names
 			}
 
-			result[fieldName] = append(result[fieldName], err.LocalizedError(localizer))
+			result[fieldName] = append(result[fieldName], err.LocalizedError(tag))
 		}
 	} else if e.messageKey != "" {
 		// If no child errors, treat this error as the single error
@@ -609,7 +599,7 @@ func (e *StackError) LocalizedErrMap(localizer *i18n.Localizer) map[string][]str
 			fieldName = "error" // Fallback for errors without field names
 		}
 
-		result[fieldName] = append(result[fieldName], e.LocalizedError(localizer))
+		result[fieldName] = append(result[fieldName], e.LocalizedError(tag))
 	}
 
 	if len(result) == 0 {

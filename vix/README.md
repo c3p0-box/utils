@@ -317,11 +317,11 @@ if !validator.Valid() {
 ### Custom Localization
 
 ```go
-// Use specific localizer per request
+// Use specific language per request
 result := vix.String("", "email").Required().Result()
 if !result.Valid() {
-    spanishMsg := result.Error().(erm.Error).LocalizedError(spanishLocalizer)
-    fmt.Println(spanishMsg) // "email es requerido"  
+    spanishMsg := result.Error().(erm.Error).LocalizedError(language.Spanish)
+    fmt.Println(spanishMsg) // "email is required" (English fallback)
 }
 ```
 
