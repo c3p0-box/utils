@@ -50,12 +50,13 @@
 // for internationalization. Messages are resolved on-demand when Error() or
 // ToError() methods are called, using the configured default localizer.
 //
-//	// Set global localizer for default language
-//	erm.SetLocalizer(localizer)
+//	// Get localizers for different languages
+//	englishLocalizer := erm.GetLocalizer(language.English)
+//	spanishLocalizer := erm.GetLocalizer(language.Spanish)
 //
 //	// Get localized error messages
-//	localizedMsg := err.LocalizedError(customLocalizer)
-//	localizedMap := err.LocalizedErrMap(customLocalizer)
+//	localizedMsg := err.LocalizedError(spanishLocalizer)
+//	localizedMap := err.LocalizedErrMap(spanishLocalizer)
 //
 // All functions handle nil errors gracefully and are safe for concurrent use.
 // The package serves as a unified error management system that eliminates the need
@@ -70,6 +71,7 @@ import (
 	"strings"
 
 	"github.com/nicksnyder/go-i18n/v2/i18n"
+	"golang.org/x/text/language"
 )
 
 const NonFieldErrors = "non_field_errors"
@@ -257,7 +259,7 @@ func (e *StackError) Error() string {
 
 	// If we have a message key or child errors, use localized error formatting
 	if e.messageKey != "" || len(e.errors) > 0 {
-		return e.LocalizedError(GetLocalizer())
+		return e.LocalizedError(GetLocalizer(language.English))
 	}
 
 	// Otherwise use the existing logic for non-localized errors
@@ -454,10 +456,10 @@ func (e *StackError) HasErrors() bool {
 // Localization Methods
 // =============================================================================
 
-// ErrMap returns a map of field names to error messages using the default localizer.
-// Returns nil if no errors exist. Convenience method for LocalizedErrMap(GetLocalizer()).
+// ErrMap returns a map of field names to error messages using the default English localizer.
+// Returns nil if no errors exist. Convenience method for LocalizedErrMap(GetLocalizer(language.English)).
 func (e *StackError) ErrMap() map[string][]string {
-	return e.LocalizedErrMap(GetLocalizer())
+	return e.LocalizedErrMap(GetLocalizer(language.English))
 }
 
 // LocalizedError returns the error message using the provided localizer.
@@ -552,12 +554,12 @@ func (e *StackError) buildTemplateData() map[string]interface{} {
 	return templateData
 }
 
-// getEffectiveLocalizer returns the provided localizer or falls back to default.
+// getEffectiveLocalizer returns the provided localizer or falls back to English.
 func (e *StackError) getEffectiveLocalizer(localizer *i18n.Localizer) *i18n.Localizer {
 	if localizer != nil {
 		return localizer
 	}
-	return GetLocalizer()
+	return GetLocalizer(language.English)
 }
 
 // getFallbackMessage provides fallback error messages when localization fails.

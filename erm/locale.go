@@ -3,7 +3,7 @@
 //
 // This file contains the localization infrastructure for the ERM error
 // management system, providing on-demand message resolution and
-// global localizer management.
+// per-language localizer management.
 package erm
 
 import (
@@ -15,37 +15,67 @@ import (
 
 // Global internationalization state
 var (
-	// defaultLocalizer is used by Error() and ToError() methods when no specific localizer is provided
-	defaultLocalizer *i18n.Localizer
-	// localizerMutex protects concurrent access to defaultLocalizer
+	// localizers stores per-language localizers, created on demand
+	localizers map[language.Tag]*i18n.Localizer
+	// localizerMutex protects concurrent access to localizers map
 	localizerMutex sync.RWMutex
 )
 
-// SetLocalizer sets the global default localizer used by Error() and ToError() methods.
-// This localizer will be used when no specific localizer is provided to localization methods.
+func init() {
+	localizers = make(map[language.Tag]*i18n.Localizer)
+}
+
+// GetLocalizer returns a localizer for the specified language.
+// If no localizer exists for the language, it creates one with English messages as fallback.
+// For unsupported languages, it creates a bundle with English messages.
 // It's safe to call this method concurrently.
-func SetLocalizer(localizer *i18n.Localizer) {
+func GetLocalizer(tag language.Tag) *i18n.Localizer {
+	// First try to get existing localizer with read lock
+	localizerMutex.RLock()
+	if localizer, exists := localizers[tag]; exists {
+		localizerMutex.RUnlock()
+		return localizer
+	}
+	localizerMutex.RUnlock()
+
+	// Need to create new localizer, acquire write lock
 	localizerMutex.Lock()
 	defer localizerMutex.Unlock()
-	defaultLocalizer = localizer
+
+	// Double-check in case another goroutine created it while we were waiting
+	if localizer, exists := localizers[tag]; exists {
+		return localizer
+	}
+
+	// Create bundle for the requested language with English messages as fallback
+	bundle := createBundleForLanguage(tag)
+	localizer := i18n.NewLocalizer(bundle, tag.String(), language.English.String())
+	localizers[tag] = localizer
+	return localizer
 }
 
-// GetLocalizer returns the current global default localizer.
-// Returns nil if no localizer has been set.
-// It's safe to call this method concurrently.
-func GetLocalizer() *i18n.Localizer {
-	localizerMutex.RLock()
-	defer localizerMutex.RUnlock()
-	return defaultLocalizer
-}
-
-// CreateDefaultBundle creates a default i18n bundle with English as the default language.
-// This is a convenience function for basic setup. For advanced usage, create your own bundle
-// and load message files as needed.
-func CreateDefaultBundle() *i18n.Bundle {
+// createBundleForLanguage creates a bundle for the specified language.
+// Currently, all bundles contain English messages. In the future, this can be
+// extended to load language-specific message files.
+func createBundleForLanguage(tag language.Tag) *i18n.Bundle {
+	// Always use English as the bundle's default language to ensure proper fallback
+	// The localizer will handle language preference and fallback
 	bundle := i18n.NewBundle(language.English)
 
-	// Add default English messages for common validation errors
+	// Add English messages to all bundles
+	addEnglishMessages(bundle)
+
+	// TODO: In the future, we can load language-specific messages here
+	// For example:
+	// if tag == language.Spanish {
+	//     addSpanishMessages(bundle)
+	// }
+
+	return bundle
+}
+
+// addEnglishMessages adds standard English validation messages to a bundle
+func addEnglishMessages(bundle *i18n.Bundle) {
 	bundle.AddMessages(language.English, &i18n.Message{
 		ID:    "validation.required",
 		Other: "{{.field}} is required",
@@ -94,15 +124,4 @@ func CreateDefaultBundle() *i18n.Bundle {
 		ID:    "error.unknown",
 		Other: "unknown error",
 	})
-
-	return bundle
-}
-
-// InitializeDefaultLocalizer creates and sets a default English localizer.
-// This is a convenience function for quick setup. Call this during application initialization
-// if you want basic English error messages without setting up your own bundle.
-func InitializeDefaultLocalizer() {
-	bundle := CreateDefaultBundle()
-	localizer := i18n.NewLocalizer(bundle, language.English.String())
-	SetLocalizer(localizer)
 }

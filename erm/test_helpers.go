@@ -13,33 +13,33 @@ import (
 
 // TestHelper provides common test utilities for ERM and VIX packages.
 type TestHelper struct {
-	t         *testing.T
-	bundle    *i18n.Bundle
-	localizer *i18n.Localizer
+	t *testing.T
 }
 
-// NewTestHelper creates a new test helper with default English localizer setup.
-// This eliminates duplicate localizer setup code across test files.
+// NewTestHelper creates a new test helper.
+// The new GetLocalizer system handles initialization automatically,
+// so no explicit localizer setup is required.
 func NewTestHelper(t *testing.T) *TestHelper {
-	bundle := CreateDefaultBundle()
-	localizer := i18n.NewLocalizer(bundle, "en")
-	SetLocalizer(localizer)
-
 	return &TestHelper{
-		t:         t,
-		bundle:    bundle,
-		localizer: localizer,
+		t: t,
 	}
 }
 
-// SetupLocalizer ensures the default English localizer is configured.
-// This is a convenience method that can be called from any test.
-func (h *TestHelper) SetupLocalizer() {
-	SetLocalizer(h.localizer)
+// GetEnglishLocalizer returns the English localizer for testing.
+func (h *TestHelper) GetEnglishLocalizer() *i18n.Localizer {
+	return GetLocalizer(language.English)
 }
 
-// CreateSpanishLocalizer creates a Spanish localizer for testing localization.
-func (h *TestHelper) CreateSpanishLocalizer() *i18n.Localizer {
+// GetSpanishLocalizer returns a Spanish localizer for testing.
+// Note: This currently returns a localizer with English fallback messages
+// since we don't have Spanish translations in the default bundles yet.
+func (h *TestHelper) GetSpanishLocalizer() *i18n.Localizer {
+	return GetLocalizer(language.Spanish)
+}
+
+// CreateCustomSpanishLocalizer creates a Spanish localizer with custom Spanish messages for testing.
+// This is useful for testing actual Spanish translations.
+func (h *TestHelper) CreateCustomSpanishLocalizer() *i18n.Localizer {
 	spanishBundle := i18n.NewBundle(language.Spanish)
 	spanishBundle.AddMessages(language.Spanish, &i18n.Message{
 		ID:    "validation.required",
@@ -90,10 +90,9 @@ func (h *TestHelper) AssertErrorEquals(err error, expected string) {
 
 // Package-level convenience functions
 
-// SetupTestLocalizer is a package-level convenience function for quick test setup.
-// This can be called from any test file to ensure proper localizer configuration.
+// SetupTestLocalizer is a deprecated function maintained for backward compatibility.
+// The new GetLocalizer system handles initialization automatically.
+// Deprecated: No setup is required with the new GetLocalizer system.
 func SetupTestLocalizer() {
-	bundle := CreateDefaultBundle()
-	localizer := i18n.NewLocalizer(bundle, "en")
-	SetLocalizer(localizer)
+	// No-op: GetLocalizer system handles initialization automatically
 }

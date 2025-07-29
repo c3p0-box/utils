@@ -10,6 +10,7 @@ A comprehensive error management package for Go applications following clean arc
 - **Error Collection**: Collect multiple related errors with automatic flattening
 - **Standard i18n**: Uses `github.com/nicksnyder/go-i18n/v2/i18n` for internationalization
 - **On-Demand Localization**: Messages resolved when `Error()` or `ErrMap()` called
+- **Per-Language Localizers**: Automatic creation and caching of localizers for different languages
 - **Clean Architecture**: Interface-based design for testability and flexibility
 - **Memory Efficient**: Immutable error objects safe for concurrent access
 
@@ -78,18 +79,18 @@ import (
     "golang.org/x/text/language"
 )
 
-// Set up i18n bundle and localizer
+// Get localizers for different languages (created automatically)
+englishLocalizer := erm.GetLocalizer(language.English)
+spanishLocalizer := erm.GetLocalizer(language.Spanish)
+
+// For advanced usage with custom message files:
 bundle := i18n.NewBundle(language.English)
 bundle.RegisterUnmarshalFunc("json", json.Unmarshal)
 bundle.LoadMessageFile("locales/en.json")
 bundle.LoadMessageFile("locales/es.json")
 
-// Set global localizer for default language
-localizer := i18n.NewLocalizer(bundle, "en")
-erm.SetLocalizer(localizer)
-
-// Or use the convenience function for basic setup
-erm.InitializeDefaultLocalizer() // Sets up English messages
+// Create custom localizer
+customLocalizer := i18n.NewLocalizer(bundle, "es")
 ```
 
 ### Message File Format
@@ -129,20 +130,25 @@ Create message files in standard go-i18n format:
 ### On-Demand Localization
 
 ```go
-// Default localization (uses global localizer)
+// Default localization (uses English by default)
 err := erm.RequiredError("email", "")
 fmt.Println(err.Error()) // "email is required"
 
-// Custom localization
-spanishLocalizer := i18n.NewLocalizer(bundle, "es")
+// Custom localization with different languages
+spanishLocalizer := erm.GetLocalizer(language.Spanish)
 localizedMsg := err.LocalizedError(spanishLocalizer)
-fmt.Println(localizedMsg) // "email es requerido"
+fmt.Println(localizedMsg) // Currently returns English since Spanish bundle uses English fallback
+
+// For custom localizer with actual Spanish messages
+customSpanishLocalizer := createCustomSpanishLocalizer() // Your implementation
+spanishMsg := err.LocalizedError(customSpanishLocalizer)
+fmt.Println(spanishMsg) // "email es requerido"
 
 // Structured errors for APIs
 errorMap := err.LocalizedErrMap(spanishLocalizer)
-// Returns: {"email": ["email es requerido"]}
+// Returns: {"email": ["email is required"]}
 
-// Convenience method using default localizer
+// Convenience method using default English localizer
 errorMap = err.ErrMap()
 // Returns: {"email": ["email is required"]}
 ```
@@ -169,24 +175,39 @@ errors := []erm.Error{
 container2.AddErrors(errors)
 
 // Get localized error map for API responses
-errorMap := container.ErrMap() // Uses global localizer
+errorMap := container.ErrMap() // Uses English localizer
 // Or with specific localizer
-errorMap = container.LocalizedErrMap(spanishLocalizer)
+errorMap = container.LocalizedErrMap(erm.GetLocalizer(language.Spanish))
 
 // Format: {"email": ["email is required"], "password": ["password must be at least 8 characters long"]}
 ```
 
-## Migration from Template System
+## Migration from SetLocalizer System
 
-Use message keys instead of templates: `NewValidationError("validation.required", "email", "")` instead of `NewValidationError("{{field}} is required", "email", "")`.
+The old `SetLocalizer`/`GetDefaultLocalizer` API has been replaced with `GetLocalizer(language.Tag)`:
+
+### Before:
+```go
+// Old API (deprecated)
+bundle := i18n.NewBundle(language.English)
+// ... add messages to bundle ...
+localizer := i18n.NewLocalizer(bundle, "en")
+erm.SetLocalizer(localizer)
+```
+
+### After:
+```go
+// New API
+englishLocalizer := erm.GetLocalizer(language.English)
+spanishLocalizer := erm.GetLocalizer(language.Spanish)
+```
 
 ## API Reference
 
 ### Core Functions
 
-- `New(code int, msg string, err error) Error` - Create enriched error (stack traces only for 500 errors)
-- `SetLocalizer(localizer *i18n.Localizer)` - Set global localizer
-- `InitializeDefaultLocalizer()` - Quick setup with English messages
+- `New(code int, msg string, err error) Error` - Create enriched error (stack traces only for 500 errors)  
+- `GetLocalizer(tag language.Tag) *i18n.Localizer` - Get or create localizer for language
 
 ### Validation Constructors
 
@@ -201,7 +222,7 @@ Use message keys instead of templates: `NewValidationError("validation.required"
 
 ```go
 type Error interface {
-    Error() string                              // Localized with global localizer
+    Error() string                              // Localized with English localizer
     LocalizedError(*i18n.Localizer) string     // Localized with specific localizer
     LocalizedErrMap(*i18n.Localizer) map[string][]string
     
@@ -212,7 +233,7 @@ type Error interface {
     
     AddError(Error)                             // Error collection (mutable)
     AddErrors([]Error)                          // Batch error collection (mutable)
-    ErrMap() map[string][]string                // Structured errors (uses global localizer)
+    ErrMap() map[string][]string                // Structured errors (uses English localizer)
     // ... other methods
 }
 ```
@@ -223,7 +244,7 @@ ERM powers VIX validation. See [VIX documentation](../vix/README.md) for validat
 
 ## Best Practices
 
-1. **Set up i18n early**: Configure `erm.SetLocalizer()` in your application initialization
+1. **Use per-language localizers**: Get localizers using `erm.GetLocalizer(language.Tag)` for different languages
 2. **Use message keys**: Prefer message keys over hardcoded templates for better maintainability
 3. **Organize message files**: Group related validations and use consistent key naming
 4. **Error collection**: Use error collection for batch validation scenarios

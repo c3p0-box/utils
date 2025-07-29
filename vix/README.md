@@ -69,12 +69,9 @@ VIX uses ERM's i18n integration. See the [ERM README](../erm/README.md#internati
 
 **Quick Setup:**
 ```go
-import "github.com/c3p0-box/utils/erm"
+// No setup required - localization is automatic!
 
-// Basic English setup
-erm.InitializeDefaultLocalizer()
-
-// All VIX validation errors are now automatically localized
+// All VIX validation errors are automatically localized to English
 result := vix.String("", "email").Required().Result()
 fmt.Println(result.Error().Error()) // "email is required"
 ```
@@ -413,11 +410,11 @@ func (vo *ValidationOrchestrator) ToJSON() ([]byte, error)
 
 ## Migration from Custom Locale System
 
-The `WithLocale()` method has been removed. Use `erm.SetLocalizer()` during initialization instead. See [ERM documentation](../erm/README.md#internationalization-setup) for details.
+The `WithLocale()` method has been removed. Use `erm.GetLocalizer(language.Tag)` to get localizers for different languages. See [ERM documentation](../erm/README.md#internationalization-setup) for details.
 
 ## Best Practices
 
-1. **Set up i18n early**: Configure `erm.SetLocalizer()` during application initialization
+1. **Use localized validation**: Get localizers using `erm.GetLocalizer(language.Tag)` for different languages
 2. **Use structured validation**: Prefer `vix.Is()` for multi-field validation
 3. **Validate at boundaries**: Validate input at service layer boundaries
 4. **Consistent field names**: Use consistent field naming across your application

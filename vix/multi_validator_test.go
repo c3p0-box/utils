@@ -626,7 +626,6 @@ func TestValidationOrchestrator_NewValidationOrchestrator(t *testing.T) {
 	if orchestrator.fieldOrder == nil {
 		t.Error("fieldOrder should not be nil")
 	}
-	// Note: locale field removed - now handled globally through erm.SetLocalizer()
 }
 
 func TestValidationOrchestrator_FieldOrder(t *testing.T) {

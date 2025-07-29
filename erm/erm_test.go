@@ -6,12 +6,11 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"golang.org/x/text/language"
 )
 
-// Initialize default localizer for tests
-func init() {
-	InitializeDefaultLocalizer()
-}
+// Tests use the automatic GetLocalizer system
 
 // =============================================================================
 // Core Constructor Tests
@@ -670,7 +669,7 @@ func TestLocalization(t *testing.T) {
 		err := NewValidationError("validation.required", "email", "")
 
 		// Create a custom localizer (this would be Spanish in real usage)
-		customLocalizer := GetLocalizer() // For this test, just use the default
+		customLocalizer := GetLocalizer(language.English) // For this test, just use English
 		msg := err.LocalizedError(customLocalizer)
 
 		if msg != "email is required" {
@@ -694,7 +693,7 @@ func TestLocalization(t *testing.T) {
 func TestLocalizedErrMap(t *testing.T) {
 	t.Run("Single error localized", func(t *testing.T) {
 		err := NewValidationError("validation.required", "email", "")
-		errorMap := err.LocalizedErrMap(GetLocalizer())
+		errorMap := err.LocalizedErrMap(GetLocalizer(language.English))
 
 		if errorMap == nil {
 			t.Fatal("Expected error map, got nil")
@@ -716,7 +715,7 @@ func TestLocalizedErrMap(t *testing.T) {
 
 		container.AddError(err1)
 		container.AddError(err2)
-		errorMap := container.LocalizedErrMap(GetLocalizer())
+		errorMap := container.LocalizedErrMap(GetLocalizer(language.English))
 
 		if len(errorMap) != 2 {
 			t.Fatalf("Expected 2 fields in error map, got %d", len(errorMap))
@@ -733,7 +732,7 @@ func TestLocalizedErrMap(t *testing.T) {
 
 	t.Run("Custom localizer", func(t *testing.T) {
 		err := NewValidationError("validation.required", "email", "")
-		customLocalizer := GetLocalizer() // For testing, use default
+		customLocalizer := GetLocalizer(language.English) // For testing, use English
 
 		errorMap := err.LocalizedErrMap(customLocalizer)
 		if errorMap == nil {
@@ -1240,7 +1239,6 @@ func (m *MockLocale) Messages() map[string]string {
 
 // TestValidationErrorFunctions tests validation error creation methods
 func TestValidationErrorFunctions(t *testing.T) {
-	InitializeDefaultLocalizer()
 
 	t.Run("NewValidationError_function", func(t *testing.T) {
 		err := NewValidationError("validation.required", "email", "")
@@ -1289,7 +1287,6 @@ func TestValidationErrorFunctions(t *testing.T) {
 
 // TestInternalFunctionEdgeCases improves coverage for internal functions
 func TestInternalFunctionEdgeCases(t *testing.T) {
-	InitializeDefaultLocalizer()
 
 	t.Run("WithParam_edge_cases", func(t *testing.T) {
 		err := NewValidationError("validation.min_length", "password", "123")

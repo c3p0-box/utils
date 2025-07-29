@@ -72,9 +72,9 @@
 // Error messages are localized using the standard go-i18n package through ERM integration.
 // Set up a localizer in your application initialization:
 //
-//	bundle := erm.CreateDefaultBundle()
-//	localizer := i18n.NewLocalizer(bundle, "en")
-//	erm.SetLocalizer(localizer)
+//	// Get localizers for different languages
+//	englishLocalizer := erm.GetLocalizer(language.English)
+//	spanishLocalizer := erm.GetLocalizer(language.Spanish)
 //
 // All validation errors will then be automatically localized when converted to strings.
 package vix

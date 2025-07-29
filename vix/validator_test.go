@@ -1717,9 +1717,6 @@ func TestValidationErrorMethods(t *testing.T) {
 			t.Error("expected parameter to be set")
 		}
 	})
-
-	// Note: Internationalization is now handled globally through erm.SetLocalizer()
-	// WithLocale method has been removed - use erm.SetLocalizer() during app initialization
 	// ValidationCode functionality has been removed since vix always uses 400 status
 }
 
