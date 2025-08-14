@@ -69,6 +69,7 @@ err := erm.MinLengthError("password", "123", 8)
 err := erm.EmailError("email", "invalid-email")
 err := erm.DuplicateError("email", "user@example.com")
 err := erm.InvalidError("format", "invalid-data")
+err := erm.NotFound("user", dbErr) // 404 error with message key "error.not_found"
 ```
 
 ### Internationalization Setup
@@ -108,6 +109,9 @@ Create message files in standard go-i18n format:
   },
   "validation.email": {
     "other": "{{.field}} must be a valid email address"
+  },
+  "error.not_found": {
+    "other": "{{.field}} not found"
   }
 }
 ```
@@ -123,6 +127,9 @@ Create message files in standard go-i18n format:
   },
   "validation.email": {
     "other": "{{.field}} debe ser una dirección de email válida"
+  },
+  "error.not_found": {
+    "other": "{{.field}} no encontrado"
   }
 }
 ```
@@ -216,6 +223,7 @@ spanishLocalizer := erm.GetLocalizer(language.Spanish)
 - `EmailError(fieldName string, value interface{}) Error`
 - `DuplicateError(fieldName string, value interface{}) Error`
 - `InvalidError(fieldName string, value interface{}) Error`
+- `NotFound(fieldName string, err error) Error` - Creates 404 error with "error.not_found" message key
 
 ### Error Interface
 

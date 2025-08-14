@@ -121,6 +121,10 @@ func addEnglishMessages(bundle *i18n.Bundle) {
 		Other: "multiple errors: {{.errors}}",
 	})
 	bundle.AddMessages(language.English, &i18n.Message{
+		ID:    "error.not_found",
+		Other: "{{.field}} is not found",
+	})
+	bundle.AddMessages(language.English, &i18n.Message{
 		ID:    "error.unknown",
 		Other: "unknown error",
 	})

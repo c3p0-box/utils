@@ -931,7 +931,6 @@ func TestConvenienceConstructors(t *testing.T) {
 		{"BadRequest", BadRequest, http.StatusBadRequest, false},
 		{"Unauthorized", Unauthorized, http.StatusUnauthorized, false},
 		{"Forbidden", Forbidden, http.StatusForbidden, false},
-		{"NotFound", NotFound, http.StatusNotFound, false},
 		{"Conflict", Conflict, http.StatusConflict, false},
 		{"Internal", Internal, http.StatusInternalServerError, true},
 	}
@@ -972,6 +971,53 @@ func TestConvenienceConstructors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNotFound tests the NotFound convenience constructor
+func TestNotFound(t *testing.T) {
+	t.Run("with error", func(t *testing.T) {
+		underlyingErr := errors.New("resource not found in database")
+		err := NotFound("user", underlyingErr)
+
+		// Test status code
+		if Status(err) != http.StatusNotFound {
+			t.Fatalf("Status() = %d, want %d", Status(err), http.StatusNotFound)
+		}
+
+		// Test that it has message key
+		if se, ok := err.(*StackError); ok {
+			if se.messageKey != "error.not_found" {
+				t.Fatalf("MessageKey() = %q, want %q", se.messageKey, "error.not_found")
+			}
+			if se.fieldName != "user" {
+				t.Fatalf("FieldName() = %q, want %q", se.fieldName, "user")
+			}
+		} else {
+			t.Fatal("NotFound should return *StackError")
+		}
+
+		// Test that it doesn't capture stack trace (4xx error)
+		if len(Stack(err)) > 0 {
+			t.Fatal("NotFound should not capture stack trace for 4xx errors")
+		}
+
+		// Test underlying error is preserved
+		if errors.Unwrap(err) != underlyingErr {
+			t.Fatal("Underlying error should be preserved")
+		}
+	})
+
+	t.Run("with nil error", func(t *testing.T) {
+		err := NotFound("resource", nil)
+
+		if Status(err) != http.StatusNotFound {
+			t.Fatalf("Status() = %d, want %d", Status(err), http.StatusNotFound)
+		}
+
+		if errors.Unwrap(err) != nil {
+			t.Fatal("Unwrap should return nil when created with nil error")
+		}
+	})
 }
 
 // =============================================================================

@@ -763,8 +763,10 @@ func Forbidden(msg string, err error) Error {
 }
 
 // NotFound creates a 404 Not Found error.
-func NotFound(msg string, err error) Error {
-	return New(http.StatusNotFound, msg, err)
+func NotFound(fieldName string, err error) Error {
+	return New(http.StatusNotFound, "", err).
+		WithMessageKey("error.not_found").
+		WithFieldName(fieldName)
 }
 
 // Conflict creates a 409 Conflict error.
