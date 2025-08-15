@@ -1290,6 +1290,79 @@ func TestStringValidatorSlug(t *testing.T) {
 	}
 }
 
+func TestStringValidatorEqualTo(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		expected  string
+		shouldErr bool
+	}{
+		{"equal strings", "hello", "hello", false},
+		{"different strings", "hello", "world", true},
+		{"empty strings equal", "", "", false},
+		{"empty vs non-empty", "", "hello", true},
+		{"non-empty vs empty", "hello", "", true},
+		{"case sensitive", "Hello", "hello", true},
+		{"whitespace matters", "hello ", "hello", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := String(tt.value, "test").EqualTo(tt.expected).Validate()
+			if tt.shouldErr && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.shouldErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestStringValidatorEqualToWithCustomMessage(t *testing.T) {
+	t.Run("custom message template", func(t *testing.T) {
+		customMsg := "{{field}} should match the expected value '{{expected}}'"
+		err := String("hello", "greeting").EqualTo("world", customMsg).Validate()
+		if err == nil {
+			t.Error("expected error but got none")
+		}
+		// Note: The actual error message checking would require ERM infrastructure
+		// This test ensures the method accepts and processes the custom message parameter
+	})
+
+	t.Run("empty custom message uses default", func(t *testing.T) {
+		err := String("hello", "greeting").EqualTo("world", "").Validate()
+		if err == nil {
+			t.Error("expected error but got none")
+		}
+	})
+}
+
+func TestStringValidatorEqualToWithNegation(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		expected  string
+		shouldErr bool
+	}{
+		{"not equal (valid)", "hello", "world", false},
+		{"equal (invalid when negated)", "hello", "hello", true},
+		{"empty strings (invalid when negated)", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := String(tt.value, "test").Not().EqualTo(tt.expected).Validate()
+			if tt.shouldErr && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.shouldErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 // TestNumberValidatorZero tests the Zero validation rule
 func TestNumberValidatorZero(t *testing.T) {
 	tests := []struct {
@@ -1339,6 +1412,118 @@ func TestNumberValidatorEqual(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNumberValidatorEqualTo(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     int
+		expected  int
+		shouldErr bool
+	}{
+		{"equal values", 42, 42, false},
+		{"different values", 42, 24, true},
+		{"zero values", 0, 0, false},
+		{"negative values equal", -10, -10, false},
+		{"negative vs positive", -10, 10, true},
+		{"positive vs zero", 5, 0, true},
+		{"zero vs negative", 0, -5, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Int(tt.value, "test").EqualTo(tt.expected).Validate()
+			if tt.shouldErr && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.shouldErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestNumberValidatorEqualToWithCustomMessage(t *testing.T) {
+	t.Run("custom message template", func(t *testing.T) {
+		customMsg := "{{field}} must be exactly {{expected}}, got {{value}}"
+		err := Int(25, "age").EqualTo(18, customMsg).Validate()
+		if err == nil {
+			t.Error("expected error but got none")
+		}
+		// Note: The actual error message checking would require ERM infrastructure
+		// This test ensures the method accepts and processes the custom message parameter
+	})
+
+	t.Run("empty custom message uses default", func(t *testing.T) {
+		err := Int(25, "age").EqualTo(18, "").Validate()
+		if err == nil {
+			t.Error("expected error but got none")
+		}
+	})
+}
+
+func TestNumberValidatorEqualToWithNegation(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     int
+		expected  int
+		shouldErr bool
+	}{
+		{"not equal (valid)", 42, 24, false},
+		{"equal (invalid when negated)", 42, 42, true},
+		{"zero values (invalid when negated)", 0, 0, true},
+		{"negative values not equal (valid)", -10, -5, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Int(tt.value, "test").Not().EqualTo(tt.expected).Validate()
+			if tt.shouldErr && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.shouldErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestNumberValidatorEqualToWithDifferentTypes(t *testing.T) {
+	t.Run("Float64 EqualTo", func(t *testing.T) {
+		err := Float64(3.14, "pi").EqualTo(3.14).Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		err = Float64(3.14, "pi").EqualTo(2.71).Validate()
+		if err == nil {
+			t.Error("expected error but got none")
+		}
+	})
+
+	t.Run("Int64 EqualTo", func(t *testing.T) {
+		err := Int64(1000000, "large").EqualTo(1000000).Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		err = Int64(1000000, "large").EqualTo(999999).Validate()
+		if err == nil {
+			t.Error("expected error but got none")
+		}
+	})
+
+	t.Run("Float32 EqualTo", func(t *testing.T) {
+		err := Float32(2.5, "half").EqualTo(2.5).Validate()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		err = Float32(2.5, "half").EqualTo(3.5).Validate()
+		if err == nil {
+			t.Error("expected error but got none")
+		}
+	})
 }
 
 // TestNumberValidatorGreaterThan tests the GreaterThan validation rule

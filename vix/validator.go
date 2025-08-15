@@ -357,6 +357,7 @@ const (
 	MsgBetween       = "validation.between"
 	MsgZero          = "validation.zero"
 	MsgEqual         = "validation.equal"
+	MsgEqualTo       = "validation.equal_to"
 	MsgGreaterThan   = "validation.greater_than"
 	MsgLessThan      = "validation.less_than"
 	MsgPositive      = "validation.positive"

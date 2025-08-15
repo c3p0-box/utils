@@ -107,6 +107,52 @@ func (sv *StringValidator) Empty() *StringValidator {
 	return sv
 }
 
+// EqualTo validates that the string equals the specified value.
+// Optionally accepts a custom error message template as the second parameter.
+// If no custom message is provided, uses the default localized message.
+//
+// Example:
+//
+//	// With default message
+//	err := vix.String("john", "username").EqualTo("admin").Validate()
+//
+//	// With custom message template
+//	err = vix.String("john", "username").
+//		EqualTo("admin", "{{field}} must be exactly '{{expected}}'").
+//		Validate()
+//
+//	// Works with negation
+//	err = vix.String("admin", "username").
+//		Not().EqualTo("root").
+//		Validate()
+func (sv *StringValidator) EqualTo(other string, msgTemplate ...string) *StringValidator {
+	if !sv.shouldValidate() {
+		return sv
+	}
+
+	str := toString(sv.value)
+	isValid := str == other
+
+	// Use custom message template if provided, otherwise use default
+	var messageKey string
+	if len(msgTemplate) > 0 && msgTemplate[0] != "" {
+		messageKey = msgTemplate[0]
+	} else {
+		messageKey = MsgEqualTo
+	}
+
+	if !isValid && !sv.negated {
+		sv.addValidationError("equal_to", messageKey,
+			map[string]interface{}{"expected": other})
+	} else if isValid && sv.negated {
+		sv.addValidationError("not_equal_to", "validation.not_equal_to",
+			map[string]interface{}{"expected": other})
+	}
+
+	sv.negated = false
+	return sv
+}
+
 // =============================================================================
 // Length/Range Validation
 // =============================================================================

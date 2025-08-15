@@ -118,6 +118,7 @@ vix.String(value, "fieldName").
     Regex(pattern).               // Matches regex pattern
     In("val1", "val2").          // Value must be in list
     NotIn("val1", "val2").       // Value must not be in list
+    EqualTo("expected").         // Value must equal expected string (with optional custom message)
     Contains("substring").        // Must contain substring
     StartsWith("prefix").         // Must start with prefix
     EndsWith("suffix").           // Must end with suffix
@@ -173,6 +174,7 @@ vix.Float64(value, "fieldName").   // For float64 validation
     Negative().                   // Must be negative
     In(val1, val2).              // Must be in list
     NotIn(val1, val2).           // Must not be in list
+    EqualTo(expected).           // Must equal expected value (with optional custom message)
     MultipleOf(divisor).          // Must be multiple of divisor
 
 // Integer-specific
@@ -213,6 +215,30 @@ validator := vix.String("customValue", "field").
         }
         return nil
     })
+```
+
+### EqualTo with Custom Messages
+
+```go
+// String validation with default message
+err := vix.String("john", "username").
+    EqualTo("admin").  // Uses default error message
+    Validate()
+
+// String validation with custom message
+err = vix.String("john", "username").
+    EqualTo("admin", "{{field}} must be exactly '{{expected}}'").
+    Validate()
+
+// Number validation with custom message
+err = vix.Int(25, "age").
+    EqualTo(18, "{{field}} must be exactly {{expected}} years old").
+    Validate()
+
+// Works with negation too
+err = vix.String("admin", "username").
+    Not().EqualTo("root", "{{field}} cannot be '{{expected}}'").
+    Validate()
 ```
 
 ### Negation

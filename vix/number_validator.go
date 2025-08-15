@@ -188,6 +188,51 @@ func (nv *NumberValidator[T]) Equal(expected T) *NumberValidator[T] {
 	return nv
 }
 
+// EqualTo validates that the number equals the specified value.
+// Optionally accepts a custom error message template as the second parameter.
+// If no custom message is provided, uses the default localized message.
+//
+// Example:
+//
+//	// With default message
+//	err := vix.Int(25, "age").EqualTo(18).Validate()
+//
+//	// With custom message template
+//	err = vix.Int(25, "age").
+//		EqualTo(18, "{{field}} must be exactly {{expected}} years old").
+//		Validate()
+//
+//	// Works with negation and different numeric types
+//	err = vix.Float64(3.14, "pi").
+//		Not().EqualTo(2.71).
+//		Validate()
+func (nv *NumberValidator[T]) EqualTo(expected T, msgTemplate ...string) *NumberValidator[T] {
+	if !nv.shouldValidate() {
+		return nv
+	}
+
+	valid := nv.value == expected
+
+	// Use custom message template if provided, otherwise use default
+	var messageKey string
+	if len(msgTemplate) > 0 && msgTemplate[0] != "" {
+		messageKey = msgTemplate[0]
+	} else {
+		messageKey = MsgEqualTo
+	}
+
+	if !valid && !nv.negated {
+		nv.addValidationError("equal_to", messageKey,
+			map[string]interface{}{"expected": expected, "value": nv.value})
+	} else if valid && nv.negated {
+		nv.addValidationError("not_equal_to", "validation.not_equal_to",
+			map[string]interface{}{"expected": expected, "value": nv.value})
+	}
+
+	nv.negated = false
+	return nv
+}
+
 // GreaterThan validates that the number is greater than the specified value.
 func (nv *NumberValidator[T]) GreaterThan(value T) *NumberValidator[T] {
 	if !nv.shouldValidate() {
