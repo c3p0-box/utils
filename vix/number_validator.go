@@ -63,7 +63,21 @@ func (nv *NumberValidator[T]) Unless(condition func() bool) *NumberValidator[T] 
 }
 
 // Custom validates using a custom validation function.
-func (nv *NumberValidator[T]) Custom(fn func(value interface{}) error) *NumberValidator[T] {
+// The function receives both the numeric value being validated and the field name,
+// allowing for more contextual error messages.
+//
+// Example:
+//
+//	err := vix.Int(13, "age").
+//		Custom(func(value interface{}, fieldName string) error {
+//			age := value.(int)
+//			if age == 13 {
+//				return erm.NewValidationError("{{field}} cannot be unlucky number 13", fieldName, value)
+//			}
+//			return nil
+//		}).
+//		Validate()
+func (nv *NumberValidator[T]) Custom(fn func(value interface{}, fieldName string) error) *NumberValidator[T] {
 	nv.BaseValidator.Custom(fn)
 	return nv
 }

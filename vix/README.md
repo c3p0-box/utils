@@ -208,10 +208,10 @@ ageValidator := vix.Int(age, "age").
 
 ```go
 validator := vix.String("customValue", "field").
-    Custom(func(value interface{}) error {
+    Custom(func(value interface{}, fieldName string) error {
         str := value.(string)
         if !isValidCustomFormat(str) {
-            return erm.NewValidationError("validation.custom_format", "field", str)
+            return erm.NewValidationError("validation.custom_format", fieldName, str)
         }
         return nil
     })

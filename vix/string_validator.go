@@ -60,7 +60,21 @@ func (sv *StringValidator) Unless(condition func() bool) *StringValidator {
 }
 
 // Custom validates using a custom validation function.
-func (sv *StringValidator) Custom(fn func(value interface{}) error) *StringValidator {
+// The function receives both the string value being validated and the field name,
+// allowing for more contextual error messages.
+//
+// Example:
+//
+//	err := vix.String("test@admin.com", "email").
+//		Custom(func(value interface{}, fieldName string) error {
+//			str := value.(string)
+//			if strings.HasSuffix(str, "@admin.com") {
+//				return erm.NewValidationError("{{field}} cannot use admin domain", fieldName, value)
+//			}
+//			return nil
+//		}).
+//		Validate()
+func (sv *StringValidator) Custom(fn func(value interface{}, fieldName string) error) *StringValidator {
 	sv.BaseValidator.Custom(fn)
 	return sv
 }

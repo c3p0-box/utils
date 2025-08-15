@@ -473,10 +473,10 @@ func TestStringValidatorConditional(t *testing.T) {
 
 func TestStringValidatorCustom(t *testing.T) {
 	// Test custom validation function
-	customValidator := func(value interface{}) error {
+	customValidator := func(value interface{}, fieldName string) error {
 		str := value.(string)
 		if strings.Contains(str, "forbidden") {
-			return erm.NewValidationError("{{field}} contains forbidden word", "test", value)
+			return erm.NewValidationError("{{field}} contains forbidden word", fieldName, value)
 		}
 		return nil
 	}
@@ -1908,7 +1908,7 @@ func TestValidationErrorMethods(t *testing.T) {
 // TestCustomValidationFunction tests custom validation functions
 func TestCustomValidationFunction(t *testing.T) {
 	t.Run("Custom validation success", func(t *testing.T) {
-		customFunc := func(value interface{}) error {
+		customFunc := func(value interface{}, fieldName string) error {
 			return nil // Always pass
 		}
 
@@ -1919,8 +1919,8 @@ func TestCustomValidationFunction(t *testing.T) {
 	})
 
 	t.Run("Custom validation failure", func(t *testing.T) {
-		customFunc := func(value interface{}) error {
-			return erm.NewValidationError("Custom error", "field", value)
+		customFunc := func(value interface{}, fieldName string) error {
+			return erm.NewValidationError("Custom error", fieldName, value)
 		}
 
 		err := String("test", "field").Custom(customFunc).Validate()
@@ -2346,7 +2346,7 @@ func TestMemoryEfficiency(t *testing.T) {
 // TestNumberValidatorCustom tests the Custom method for NumberValidator
 func TestNumberValidatorCustom(t *testing.T) {
 	t.Run("Custom validation success", func(t *testing.T) {
-		customFunc := func(value interface{}) error {
+		customFunc := func(value interface{}, fieldName string) error {
 			return nil // Always pass
 		}
 
@@ -2357,8 +2357,8 @@ func TestNumberValidatorCustom(t *testing.T) {
 	})
 
 	t.Run("Custom validation failure", func(t *testing.T) {
-		customFunc := func(value interface{}) error {
-			return erm.NewValidationError("validation.custom", "test", value)
+		customFunc := func(value interface{}, fieldName string) error {
+			return erm.NewValidationError("validation.custom", fieldName, value)
 		}
 
 		err := Int(42, "test").Custom(customFunc).Validate()

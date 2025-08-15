@@ -115,7 +115,7 @@ type ValidatorChain interface {
 	Unless(condition func() bool) ValidatorChain
 
 	// Custom validates using a custom validation function
-	Custom(fn func(value interface{}) error) ValidatorChain
+	Custom(fn func(value interface{}, fieldName string) error) ValidatorChain
 }
 
 // =============================================================================
@@ -294,7 +294,21 @@ func (bv *BaseValidator) Result() *ValidationResult {
 }
 
 // Custom validates using a custom validation function.
-func (bv *BaseValidator) Custom(fn func(value interface{}) error) *BaseValidator {
+// The function receives both the value being validated and the field name,
+// allowing for more contextual error messages.
+//
+// Example:
+//
+//	err := vix.String("test", "username").
+//		Custom(func(value interface{}, fieldName string) error {
+//			str := value.(string)
+//			if strings.Contains(str, "admin") {
+//				return erm.NewValidationError("{{field}} cannot contain 'admin'", fieldName, value)
+//			}
+//			return nil
+//		}).
+//		Validate()
+func (bv *BaseValidator) Custom(fn func(value interface{}, fieldName string) error) *BaseValidator {
 	if !bv.shouldValidate() {
 		return bv
 	}
@@ -304,7 +318,7 @@ func (bv *BaseValidator) Custom(fn func(value interface{}) error) *BaseValidator
 		return bv
 	}
 
-	err := fn(bv.value)
+	err := fn(bv.value, bv.fieldName)
 	if err != nil {
 		if bv.negated {
 			// If negated and custom validation failed, it's actually valid
