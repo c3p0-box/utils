@@ -1,296 +1,14 @@
 package srv
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 )
-
-// Test helper to capture slog output
-func captureLogs(t *testing.T, fn func()) string {
-	t.Helper()
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{}))
-	oldLogger := slog.Default()
-	slog.SetDefault(logger)
-	defer slog.SetDefault(oldLogger)
-
-	fn()
-	return buf.String()
-}
-
-func TestMiddleware_Type(t *testing.T) {
-	// Test that Middleware type can be used
-	var middleware Middleware = func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Test", "true")
-			next.ServeHTTP(w, r)
-		})
-	}
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	wrapped := middleware(handler)
-	req := httptest.NewRequest("GET", "/test", nil)
-	rec := httptest.NewRecorder()
-
-	wrapped.ServeHTTP(rec, req)
-
-	if rec.Header().Get("X-Test") != "true" {
-		t.Errorf("Expected X-Test header to be 'true', got '%s'", rec.Header().Get("X-Test"))
-	}
-}
-
-func TestMiddlewareChain_SingleMiddleware(t *testing.T) {
-	middleware := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Test", "middleware")
-			next.ServeHTTP(w, r)
-		})
-	}
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	chain := MiddlewareChain(middleware)
-	wrapped := chain(handler)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	rec := httptest.NewRecorder()
-
-	wrapped.ServeHTTP(rec, req)
-
-	if rec.Header().Get("X-Test") != "middleware" {
-		t.Errorf("Expected X-Test header to be 'middleware', got '%s'", rec.Header().Get("X-Test"))
-	}
-}
-
-func TestMiddlewareChain_MultipleMiddleware(t *testing.T) {
-	// Test that middleware are applied in correct order (first in chain is outermost)
-	var order []string
-	mutex := &sync.Mutex{}
-
-	middleware1 := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			mutex.Lock()
-			order = append(order, "middleware1-before")
-			mutex.Unlock()
-			next.ServeHTTP(w, r)
-			mutex.Lock()
-			order = append(order, "middleware1-after")
-			mutex.Unlock()
-		})
-	}
-
-	middleware2 := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			mutex.Lock()
-			order = append(order, "middleware2-before")
-			mutex.Unlock()
-			next.ServeHTTP(w, r)
-			mutex.Lock()
-			order = append(order, "middleware2-after")
-			mutex.Unlock()
-		})
-	}
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mutex.Lock()
-		order = append(order, "handler")
-		mutex.Unlock()
-		w.WriteHeader(http.StatusOK)
-	})
-
-	chain := MiddlewareChain(middleware1, middleware2)
-	wrapped := chain(handler)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	rec := httptest.NewRecorder()
-
-	wrapped.ServeHTTP(rec, req)
-
-	expected := []string{
-		"middleware1-before",
-		"middleware2-before",
-		"handler",
-		"middleware2-after",
-		"middleware1-after",
-	}
-
-	if len(order) != len(expected) {
-		t.Fatalf("Expected %d elements in order, got %d: %v", len(expected), len(order), order)
-	}
-
-	for i, exp := range expected {
-		if order[i] != exp {
-			t.Errorf("Expected order[%d] to be '%s', got '%s'", i, exp, order[i])
-		}
-	}
-}
-
-func TestMiddlewareChain_EmptyChain(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Test", "handler")
-		w.WriteHeader(http.StatusOK)
-	})
-
-	chain := MiddlewareChain()
-	wrapped := chain(handler)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	rec := httptest.NewRecorder()
-
-	wrapped.ServeHTTP(rec, req)
-
-	if rec.Header().Get("X-Test") != "handler" {
-		t.Errorf("Expected X-Test header to be 'handler', got '%s'", rec.Header().Get("X-Test"))
-	}
-}
-
-func TestMiddlewareWriter_WriteHeader(t *testing.T) {
-	rec := httptest.NewRecorder()
-	mw := &MiddlewareWriter{ResponseWriter: rec, StatusCode: http.StatusOK}
-
-	mw.WriteHeader(http.StatusNotFound)
-
-	if mw.StatusCode != http.StatusNotFound {
-		t.Errorf("Expected StatusCode to be %d, got %d", http.StatusNotFound, mw.StatusCode)
-	}
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("Expected underlying ResponseWriter Code to be %d, got %d", http.StatusNotFound, rec.Code)
-	}
-}
-
-func TestMiddlewareWriter_DefaultStatusCode(t *testing.T) {
-	rec := httptest.NewRecorder()
-	mw := &MiddlewareWriter{ResponseWriter: rec, StatusCode: http.StatusOK}
-
-	// Don't call WriteHeader explicitly
-	mw.Write([]byte("test"))
-
-	if mw.StatusCode != http.StatusOK {
-		t.Errorf("Expected StatusCode to remain %d, got %d", http.StatusOK, mw.StatusCode)
-	}
-}
-
-func TestLogging_CapturesRequestInfo(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("test response"))
-	})
-
-	wrapped := Logging(handler)
-	req := httptest.NewRequest("POST", "/api/test?param=value", strings.NewReader("test body"))
-	req.Header.Set("User-Agent", "test-agent/1.0")
-	req.RemoteAddr = "192.168.1.1:12345"
-	rec := httptest.NewRecorder()
-
-	logOutput := captureLogs(t, func() {
-		wrapped.ServeHTTP(rec, req)
-	})
-
-	// Check that log contains expected information
-	expectedParts := []string{
-		"views.Logging",
-		"status=201",
-		"method=POST",
-		"path=/api/test",
-		"user-agent=test-agent/1.0",
-		"remote-addr=192.168.1.1:12345",
-		"request completed",
-	}
-
-	for _, part := range expectedParts {
-		if !strings.Contains(logOutput, part) {
-			t.Errorf("Expected log output to contain '%s', but it didn't. Log output: %s", part, logOutput)
-		}
-	}
-}
-
-func TestLogging_DefaultStatusCode(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Don't explicitly set status code
-		w.Write([]byte("test"))
-	})
-
-	wrapped := Logging(handler)
-	req := httptest.NewRequest("GET", "/test", nil)
-	rec := httptest.NewRecorder()
-
-	logOutput := captureLogs(t, func() {
-		wrapped.ServeHTTP(rec, req)
-	})
-
-	if !strings.Contains(logOutput, "status=200") {
-		t.Errorf("Expected log output to contain 'status=200' for default status code. Log output: %s", logOutput)
-	}
-}
-
-func TestRecover_HandlesPanic(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		panic("test panic")
-	})
-
-	wrapped := Recover(handler)
-	req := httptest.NewRequest("GET", "/test", nil)
-	rec := httptest.NewRecorder()
-
-	logOutput := captureLogs(t, func() {
-		// This should not panic and should log the error
-		wrapped.ServeHTTP(rec, req)
-	})
-
-	expectedParts := []string{
-		"views.Recover",
-		"error=\"test panic\"",
-		"recovered from panic",
-	}
-
-	for _, part := range expectedParts {
-		if !strings.Contains(logOutput, part) {
-			t.Errorf("Expected log output to contain '%s', but it didn't. Log output: %s", part, logOutput)
-		}
-	}
-}
-
-func TestRecover_NormalOperation(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
-	})
-
-	wrapped := Recover(handler)
-	req := httptest.NewRequest("GET", "/test", nil)
-	rec := httptest.NewRecorder()
-
-	logOutput := captureLogs(t, func() {
-		wrapped.ServeHTTP(rec, req)
-	})
-
-	// Should not log anything when no panic occurs
-	if strings.Contains(logOutput, "recovered from panic") {
-		t.Errorf("Expected no panic recovery log, but got: %s", logOutput)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("Expected status code %d, got %d", http.StatusOK, rec.Code)
-	}
-
-	if rec.Body.String() != "success" {
-		t.Errorf("Expected body 'success', got '%s'", rec.Body.String())
-	}
-}
 
 func TestRunServer_ParameterDefaults(t *testing.T) {
 	// Test parameter default logic without actually calling RunServer
@@ -329,57 +47,6 @@ func TestRunServer_ParameterDefaults(t *testing.T) {
 	if customPort != "9999" {
 		t.Errorf("Expected custom port to be preserved as '9999', got '%s'", customPort)
 	}
-}
-
-// Integration test for middleware chain with logging and recovery
-func TestMiddlewareIntegration(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/panic" {
-			panic("test panic in handler")
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
-	})
-
-	// Chain both middleware
-	wrapped := MiddlewareChain(Logging, Recover)(handler)
-
-	t.Run("normal request", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/test", nil)
-		rec := httptest.NewRecorder()
-
-		logOutput := captureLogs(t, func() {
-			wrapped.ServeHTTP(rec, req)
-		})
-
-		// Should have logging but no panic recovery
-		if !strings.Contains(logOutput, "request completed") {
-			t.Error("Expected logging output")
-		}
-		if strings.Contains(logOutput, "recovered from panic") {
-			t.Error("Should not have panic recovery log for normal request")
-		}
-		if rec.Code != http.StatusOK {
-			t.Errorf("Expected status 200, got %d", rec.Code)
-		}
-	})
-
-	t.Run("panic request", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/panic", nil)
-		rec := httptest.NewRecorder()
-
-		logOutput := captureLogs(t, func() {
-			wrapped.ServeHTTP(rec, req)
-		})
-
-		// Should have both logging and panic recovery
-		if !strings.Contains(logOutput, "request completed") {
-			t.Error("Expected logging output")
-		}
-		if !strings.Contains(logOutput, "recovered from panic") {
-			t.Error("Expected panic recovery log")
-		}
-	})
 }
 
 // Test cleanup function behavior
@@ -505,5 +172,292 @@ func TestRunServer_PrivilegedPort(t *testing.T) {
 	// Cleanup should not be called if server fails to start
 	if cleanupCalled {
 		t.Error("Expected cleanup not to be called when server fails to start")
+	}
+}
+
+// ============================
+// Mux Tests
+// ============================
+
+func TestNewMux(t *testing.T) {
+	mux := NewMux()
+
+	if mux == nil {
+		t.Fatal("Expected NewMux to return non-nil mux")
+	}
+	if mux.Mux() == nil {
+		t.Error("Expected mux to have underlying ServeMux")
+	}
+}
+
+func TestMux_BasicMethods(t *testing.T) {
+	mux := NewMux()
+
+	// Test Handle and HandleFunc
+	handled := false
+	mux.Handle("/handle", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handled = true
+		w.WriteHeader(200)
+	}))
+
+	mux.HandleFunc("/handlefunc", func(w http.ResponseWriter, r *http.Request) {
+		handled = true
+		w.WriteHeader(200)
+	})
+
+	// Test that mux implements http.Handler
+	var _ http.Handler = mux
+
+	// Test ServeHTTP with Handle
+	req := httptest.NewRequest("GET", "/handle", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if !handled {
+		t.Error("Expected handler to be called")
+	}
+	if rec.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", rec.Code)
+	}
+
+	// Reset and test HandleFunc
+	handled = false
+	req = httptest.NewRequest("GET", "/handlefunc", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if !handled {
+		t.Error("Expected handler function to be called")
+	}
+}
+
+func TestMux_HTTPMethods(t *testing.T) {
+	mux := NewMux()
+
+	methods := []struct {
+		name    string
+		method  string
+		setup   func(string, HandlerFunc)
+		pattern string
+	}{
+		{"GET", "GET", mux.Get, "/get"},
+		{"POST", "POST", mux.Post, "/post"},
+		{"PUT", "PUT", mux.Put, "/put"},
+		{"DELETE", "DELETE", mux.Delete, "/delete"},
+		{"PATCH", "PATCH", mux.Patch, "/patch"},
+		{"HEAD", "HEAD", mux.Head, "/head"},
+		{"OPTIONS", "OPTIONS", mux.Options, "/options"},
+	}
+
+	for _, test := range methods {
+		t.Run(test.name, func(t *testing.T) {
+			called := false
+			test.setup(test.pattern, func(ctx *HttpContext) error {
+				called = true
+				ctx.WriteHeader(200)
+				return nil
+			})
+
+			// Test correct method
+			req := httptest.NewRequest(test.method, test.pattern, nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if !called {
+				t.Errorf("Expected %s handler to be called", test.method)
+			}
+			if rec.Code != 200 {
+				t.Errorf("Expected status code 200, got %d", rec.Code)
+			}
+
+			// Test wrong method (should not match)
+			called = false
+			wrongMethod := "GET"
+			if test.method == "GET" {
+				wrongMethod = "POST"
+			}
+
+			req = httptest.NewRequest(wrongMethod, test.pattern, nil)
+			rec = httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if called {
+				t.Errorf("Expected %s handler NOT to be called for %s request", test.method, wrongMethod)
+			}
+		})
+	}
+}
+
+func TestMux_Integration(t *testing.T) {
+	mux := NewMux()
+
+	// Set up various routes
+	mux.Get("/users", func(ctx *HttpContext) error {
+		return ctx.String(200, "GET users")
+	})
+
+	mux.Post("/users", func(ctx *HttpContext) error {
+		return ctx.String(201, "POST users")
+	})
+
+	mux.Get("/users/{id}", func(ctx *HttpContext) error {
+		id := ctx.Param("id")
+		return ctx.String(200, "GET user "+id)
+	})
+
+	tests := []struct {
+		method         string
+		path           string
+		expectedStatus int
+		expectedBody   string
+	}{
+		{"GET", "/users", 200, "GET users"},
+		{"POST", "/users", 201, "POST users"},
+		{"GET", "/users/123", 200, "GET user 123"},
+	}
+
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("%s %s", test.method, test.path), func(t *testing.T) {
+			req := httptest.NewRequest(test.method, test.path, nil)
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != test.expectedStatus {
+				t.Errorf("Expected status %d, got %d", test.expectedStatus, rec.Code)
+			}
+
+			if rec.Body.String() != test.expectedBody {
+				t.Errorf("Expected body '%s', got '%s'", test.expectedBody, rec.Body.String())
+			}
+		})
+	}
+}
+
+// ============================
+// Error Handling Tests
+// ============================
+
+func TestMux_ErrorHandler(t *testing.T) {
+	mux := NewMux()
+
+	var capturedError error
+	var capturedContext *HttpContext
+
+	// Set custom error handler
+	mux.ErrorHandler(func(ctx *HttpContext, err error) {
+		capturedError = err
+		capturedContext = ctx
+		ctx.JSON(400, map[string]string{"error": "Custom error: " + err.Error()})
+	})
+
+	// Register a handler that returns an error
+	mux.Get("/error", func(ctx *HttpContext) error {
+		return errors.New("test error")
+	})
+
+	// Test the error handling
+	req := httptest.NewRequest("GET", "/error", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	// Verify error was captured
+	if capturedError == nil {
+		t.Error("Expected error to be captured by error handler")
+	}
+	if capturedError.Error() != "test error" {
+		t.Errorf("Expected error message 'test error', got '%s'", capturedError.Error())
+	}
+	if capturedContext == nil {
+		t.Error("Expected context to be passed to error handler")
+	}
+
+	// Verify response
+	if rec.Code != 400 {
+		t.Errorf("Expected status code 400, got %d", rec.Code)
+	}
+
+	expectedBody := `{"error":"Custom error: test error"}`
+	if strings.TrimSpace(rec.Body.String()) != expectedBody {
+		t.Errorf("Expected body '%s', got '%s'", expectedBody, strings.TrimSpace(rec.Body.String()))
+	}
+}
+
+func TestMux_DefaultErrorHandler(t *testing.T) {
+	mux := NewMux()
+
+	// Register a handler that returns an error (should use default error handler)
+	mux.Post("/error", func(ctx *HttpContext) error {
+		return errors.New("internal error")
+	})
+
+	// Test the default error handling
+	req := httptest.NewRequest("POST", "/error", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	// Verify default error response
+	if rec.Code != 500 {
+		t.Errorf("Expected status code 500, got %d", rec.Code)
+	}
+
+	expectedBody := `{"error":"Internal Server Error"}`
+	if strings.TrimSpace(rec.Body.String()) != expectedBody {
+		t.Errorf("Expected body '%s', got '%s'", expectedBody, strings.TrimSpace(rec.Body.String()))
+	}
+}
+
+func TestMux_NoErrorHandling(t *testing.T) {
+	mux := NewMux()
+
+	// Register a handler that returns no error
+	mux.Put("/success", func(ctx *HttpContext) error {
+		return ctx.JSON(200, map[string]string{"status": "success"})
+	})
+
+	// Test successful handling
+	req := httptest.NewRequest("PUT", "/success", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	// Verify success response
+	if rec.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", rec.Code)
+	}
+
+	expectedBody := `{"status":"success"}`
+	if strings.TrimSpace(rec.Body.String()) != expectedBody {
+		t.Errorf("Expected body '%s', got '%s'", expectedBody, strings.TrimSpace(rec.Body.String()))
+	}
+}
+
+func TestMux_ErrorFromResponseMethod(t *testing.T) {
+	mux := NewMux()
+
+	var capturedError error
+	mux.ErrorHandler(func(ctx *HttpContext, err error) {
+		capturedError = err
+		ctx.String(500, "Response error occurred")
+	})
+
+	// Register a handler that has an error in the response method
+	mux.Delete("/response-error", func(ctx *HttpContext) error {
+		// This should work fine and not trigger error handler
+		return ctx.JSON(200, map[string]string{"message": "success"})
+	})
+
+	// Test the handling
+	req := httptest.NewRequest("DELETE", "/response-error", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	// Verify no error was captured (JSON should work fine)
+	if capturedError != nil {
+		t.Errorf("Expected no error to be captured, but got: %v", capturedError)
+	}
+
+	// Verify successful response
+	if rec.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", rec.Code)
 	}
 }

@@ -25,100 +25,12 @@ package srv
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 )
-
-// Middleware represents an HTTP middleware function that takes an http.Handler
-// and returns a new http.Handler, typically wrapping the original handler
-// with additional functionality.
-type Middleware func(next http.Handler) http.Handler
-
-// MiddlewareChain combines multiple middleware functions into a single middleware.
-// The middleware are applied in reverse order, so the first middleware in the list
-// will be the outermost wrapper.
-//
-// Example:
-//
-//	chain := MiddlewareChain(Logging, Recover)
-//	handler := chain(mux) // Results in: Logging(Recover(mux))
-func MiddlewareChain(m ...Middleware) Middleware {
-	return func(next http.Handler) http.Handler {
-		for i := len(m) - 1; i >= 0; i-- {
-			next = m[i](next)
-		}
-		return next
-	}
-}
-
-// MiddlewareWriter is a wrapper around http.ResponseWriter that captures
-// the HTTP status code for logging purposes. It implements http.ResponseWriter
-// and stores the status code when WriteHeader is called.
-type MiddlewareWriter struct {
-	http.ResponseWriter
-	StatusCode int
-}
-
-// WriteHeader captures the status code and calls the underlying ResponseWriter's WriteHeader.
-// If WriteHeader is not called explicitly, the status code defaults to http.StatusOK.
-func (w *MiddlewareWriter) WriteHeader(statusCode int) {
-	w.StatusCode = statusCode
-	w.ResponseWriter.WriteHeader(statusCode)
-}
-
-// Logging is a middleware that logs HTTP requests with structured logging using slog.
-// It captures the HTTP method, path, status code, user agent, and remote address.
-// The status code is captured using MiddlewareWriter.
-//
-// The logged information includes:
-//   - name: "views.Logging" (logger identifier)
-//   - status: HTTP status code
-//   - method: HTTP method (GET, POST, etc.)
-//   - path: Request URL path
-//   - user-agent: Client user agent string
-//   - remote-addr: Client remote address
-func Logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mw := &MiddlewareWriter{w, http.StatusOK}
-		next.ServeHTTP(mw, r)
-		slog.With(
-			slog.String("name", "views.Logging"),
-			slog.Int("status", mw.StatusCode),
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.String("user-agent", r.UserAgent()),
-			slog.String("remote-addr", r.RemoteAddr),
-		).Info("request completed")
-	})
-}
-
-// Recover is a middleware that recovers from panics during HTTP request processing.
-// When a panic occurs, it logs the error using structured logging and allows the
-// request to complete gracefully instead of crashing the server.
-//
-// The panic is logged with:
-//   - name: "views.Recover" (logger identifier)
-//   - error: The recovered panic value
-//
-// After logging, the middleware allows the panic to continue, which will typically
-// result in a 500 Internal Server Error response.
-func Recover(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				slog.With(
-					slog.String("name", "views.Recover"),
-					slog.Any("error", err),
-				).Error("recovered from panic")
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
-}
 
 // RunServer starts an HTTP server with graceful shutdown capabilities.
 // It listens on the specified host and port, and shuts down gracefully when
@@ -195,4 +107,133 @@ func RunServer(handler http.Handler, host string, port string, cleanup func() er
 		return err
 	}
 	return nil
+}
+
+// ============================
+// Mux - HTTP Router Wrapper
+// ============================
+
+// HandlerFunc defines a handler function that receives an HttpContext and returns an error.
+// This allows for more elegant error handling compared to traditional http.HandlerFunc.
+// If the handler returns an error, it will be passed to the configured error handler.
+//
+// Example:
+//
+//	func getUserHandler(ctx *HttpContext) error {
+//	    id := ctx.Param("id")
+//	    user, err := getUserByID(id)
+//	    if err != nil {
+//	        return err  // Error will be handled by error handler
+//	    }
+//	    return ctx.JSON(200, user)
+//	}
+type HandlerFunc func(ctx *HttpContext) error
+
+// Mux provides a convenient wrapper around Go's standard http.ServeMux
+// with helper methods for common HTTP operations, RESTful routing, and centralized error handling.
+//
+// The Mux supports two types of handlers:
+//   - Traditional http.Handler and http.HandlerFunc via Handle() and HandleFunc()
+//   - Enhanced HandlerFunc via HTTP method helpers (Get, Post, etc.) with automatic error handling
+type Mux struct {
+	mux        *http.ServeMux
+	errHandler func(ctx *HttpContext, err error)
+}
+
+// NewMux creates a new Mux instance with an underlying http.ServeMux and a default error handler.
+// The default error handler responds with a 500 Internal Server Error and logs the error.
+func NewMux() *Mux {
+	return &Mux{
+		mux: http.NewServeMux(),
+		errHandler: func(ctx *HttpContext, err error) {
+			ctx.JSON(500, map[string]string{"error": "Internal Server Error"})
+		},
+	}
+}
+
+// Mux returns the underlying http.ServeMux for advanced usage or
+// integration with other HTTP libraries.
+func (m *Mux) Mux() *http.ServeMux {
+	return m.mux
+}
+
+// ServeHTTP implements http.Handler interface, allowing Mux to be used
+// directly as an HTTP handler.
+func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	m.mux.ServeHTTP(w, r)
+}
+
+// Handle registers a handler for the given pattern.
+func (m *Mux) Handle(pattern string, handler http.Handler) {
+	m.mux.Handle(pattern, handler)
+}
+
+// HandleFunc registers a handler function for the given pattern.
+func (m *Mux) HandleFunc(pattern string, handler http.HandlerFunc) {
+	m.mux.HandleFunc(pattern, handler)
+}
+
+// ErrorHandler sets a custom error handler for all HandlerFunc-based routes.
+// The error handler will be called whenever a HandlerFunc returns a non-nil error.
+// If no custom error handler is set, the default handler returns a 500 Internal Server Error.
+//
+// Example:
+//
+//	mux.ErrorHandler(func(ctx *HttpContext, err error) {
+//	    log.Printf("Handler error: %v", err)
+//	    ctx.JSON(500, map[string]string{"error": err.Error()})
+//	})
+func (m *Mux) ErrorHandler(handler func(c *HttpContext, err error)) {
+	m.errHandler = handler
+}
+
+// execHandler is an internal method that wraps HandlerFunc with error handling.
+// It creates an HttpContext and passes it to the handler. If the handler returns
+// an error, it calls the configured error handler with the same context.
+func (m *Mux) execHandler(pattern string, handler HandlerFunc) {
+	m.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+		ctx := NewHttpContext(w, r)
+		if err := handler(ctx); err != nil {
+			m.errHandler(ctx, err)
+		}
+	})
+}
+
+// ============================
+// HTTP Method Helpers
+// ============================
+
+// Get registers a handler for GET requests to the specified pattern.
+func (m *Mux) Get(pattern string, handler HandlerFunc) {
+	m.execHandler("GET "+pattern, handler)
+}
+
+// Post registers a handler for POST requests to the specified pattern.
+func (m *Mux) Post(pattern string, handler HandlerFunc) {
+	m.execHandler("POST "+pattern, handler)
+}
+
+// Put registers a handler for PUT requests to the specified pattern.
+func (m *Mux) Put(pattern string, handler HandlerFunc) {
+	m.execHandler("PUT "+pattern, handler)
+}
+
+// Delete registers a handler for DELETE requests to the specified pattern.
+func (m *Mux) Delete(pattern string, handler HandlerFunc) {
+	m.execHandler("DELETE "+pattern, handler)
+}
+
+// Patch registers a handler for PATCH requests to the specified pattern.
+func (m *Mux) Patch(pattern string, handler HandlerFunc) {
+	m.execHandler("PATCH "+pattern, handler)
+}
+
+// Head registers a handler for HEAD requests to the specified pattern.
+func (m *Mux) Head(pattern string, handler HandlerFunc) {
+	m.execHandler("HEAD "+pattern, handler)
+}
+
+// Options registers a handler for OPTIONS requests to the specified pattern.
+func (m *Mux) Options(pattern string, handler HandlerFunc) {
+	m.execHandler("OPTIONS "+pattern, handler)
 }
