@@ -1,18 +1,109 @@
 # VIX - Type-Safe Validation Library for Go
 
-A modern, type-safe, and expressive validation library for Go that follows clean architecture principles. VIX integrates seamlessly with the ERM centralized error management package for unified error handling and **standard internationalization using go-i18n**.
+A modern, type-safe, and expressive validation library for Go that follows clean architecture principles. VIX integrates seamlessly with the ERM centralized error management package for unified error handling and **lightweight internationalization using our custom i18n package**.
 
 ## Features
 
 - **Type-Safe Validation**: Leverage Go generics for compile-time type safety
 - **Expressive API**: Fluent, chainable syntax for readable validation rules
-- **Standard i18n**: Uses `github.com/nicksnyder/go-i18n/v2/i18n` through ERM integration
+- **Lightweight i18n**: Uses custom `github.com/c3p0-box/utils/i18n` package through ERM integration
 - **Function Chaining**: Readable and maintainable validation rules without struct tags
 - **Conditional Validation**: Built-in support for conditional validation logic
 - **Clean Architecture**: Integrates perfectly with onion/clean architecture patterns  
 - **Unified Error Management**: All validation errors are ERM Error instances with automatic localization
+- **Centralized Messages**: All validation messages managed in ERM's locale system
 - **Comprehensive Types**: Support for strings, numbers, dates, and custom validations
 - **Performance Optimized**: Lazy evaluation and efficient validation chains
+
+## Architecture Overview
+
+VIX follows a layered architecture for validation and error management:
+
+```
+┌─────────────────────────────────┐
+│             VIX                 │  ← Validation Rules & Logic
+│        (Type-Safe API)          │
+└─────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│             ERM                 │  ← Error Management & Localization
+│     (Error Wrapping & i18n)     │
+└─────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│          Custom i18n            │  ← Message Storage & Translation
+│    (Lightweight Singleton)      │
+└─────────────────────────────────┘
+```
+
+### **Layer Responsibilities:**
+
+1. **VIX Layer** - Provides type-safe validation API with fluent syntax
+   - Defines validation rules (Required, Email, MinLength, etc.)
+   - Manages validation chains and conditional logic
+   - Uses message constants that map to localized keys
+
+2. **ERM Layer** - Centralizes error management and localization
+   - Wraps validation errors with structured metadata
+   - Provides localization infrastructure via `erm.GetLocalizer()`
+   - Manages message keys and templates in `erm/locale.go`
+   - Converts validation errors to HTTP-ready responses
+
+3. **Custom i18n Layer** - Lightweight message translation
+   - Singleton pattern for global message storage
+   - Thread-safe translation management
+   - Template-based message rendering with Go text templates
+   - Minimal dependencies (only Go stdlib + `golang.org/x/text`)
+
+### **Message Constants Management:**
+
+All validation message keys are centralized in ERM as typed constants:
+
+```go
+// Defined in erm/locale.go
+const (
+    MsgRequired    = "validation.required"
+    MsgEmail       = "validation.email" 
+    MsgMinLength   = "validation.min_length"
+    // ... and many more
+)
+```
+
+VIX validators use these constants instead of hardcoded strings:
+
+```go
+// In VIX validation logic  
+sv.addValidationError(erm.MsgRequired, nil)  // Type-safe message key
+```
+
+### **Message Flow:**
+
+```go
+// 1. VIX validation fails
+vix.String("", "email").Required() 
+
+// 2. VIX calls ERM with message key
+erm.NewValidationError("validation.required", "email", "")
+
+// 3. ERM calls i18n for localized message
+i18n.Translate(language.English, "validation.required", 1, map[string]interface{}{
+    "field": "email"
+})
+
+// 4. i18n returns: "email is required"
+```
+
+### **Benefits:**
+
+- **Centralized Messages**: All validation messages defined once in `erm/locale.go`
+- **Type Safety**: Compile-time validation of message keys via typed constants
+- **Consistent Localization**: Same i18n system used across all error types  
+- **Performance**: Message constants avoid runtime string allocations
+- **Maintainability**: Clear separation between validation logic and presentation
+- **DRY Principle**: Message constants prevent duplication across validation types
+- **IDE Support**: Auto-completion and refactoring support for message keys
 
 ## Installation
 
@@ -65,7 +156,13 @@ if !validator.Valid() {
 
 ## Internationalization
 
-VIX uses ERM's i18n integration. See the [ERM README](../erm/README.md#internationalization-setup) for complete setup instructions.
+VIX uses ERM's integration with our custom lightweight i18n package for localized error messages. All validation messages are centrally managed and automatically localized.
+
+**Architecture:**
+- **Message Definition**: All validation messages are defined in `erm/locale.go` 
+- **Automatic Localization**: VIX validation errors are automatically localized through ERM
+- **Default Language**: English is the default language, with easy extensibility for additional languages
+- **Message Keys**: VIX uses standardized message keys (e.g., `validation.required`, `validation.email`)
 
 **Quick Setup:**
 ```go
@@ -74,6 +171,27 @@ VIX uses ERM's i18n integration. See the [ERM README](../erm/README.md#internati
 // All VIX validation errors are automatically localized to English
 result := vix.String("", "email").Required().Result()
 fmt.Println(result.Error().Error()) // "email is required"
+
+// For different languages, use ERM's localizer
+localizer := erm.GetLocalizer(language.Spanish) // If Spanish messages were added
+```
+
+**Adding New Languages:**
+```go
+// In your application initialization
+import "github.com/c3p0-box/utils/i18n"
+
+// Add Spanish translations for all validation messages
+spanishMessages := map[string]*i18n.Translation{
+    "validation.required": {Singular: "{{.field}} es requerido", Plural: ""},
+    "validation.email":    {Singular: "{{.field}} debe ser un email válido", Plural: ""},
+    // ... other validation messages
+}
+
+err := i18n.AddTranslations(language.Spanish, spanishMessages)
+if err != nil {
+    panic(err)
+}
 ```
 
 ## String Validation
@@ -343,11 +461,19 @@ if !validator.Valid() {
 ### Custom Localization
 
 ```go
-// Use specific language per request
+// Use specific language per request via ERM localizer
+localizer := erm.GetLocalizer(language.Spanish)
 result := vix.String("", "email").Required().Result()
 if !result.Valid() {
-    spanishMsg := result.Error().(erm.Error).LocalizedError(language.Spanish)
-    fmt.Println(spanishMsg) // "email is required" (English fallback)
+    // Get localized error message
+    config := erm.LocalizeConfig{
+        MessageID: result.Error().(erm.Error).MessageKey(),
+        TemplateData: map[string]interface{}{
+            "field": result.Error().(erm.Error).FieldName(),
+        },
+    }
+    spanishMsg := localizer.MustLocalize(config)
+    fmt.Println(spanishMsg) // "email es requerido" (if Spanish translation available)
 }
 ```
 
@@ -434,9 +560,34 @@ func (vo *ValidationOrchestrator) ToJSON() ([]byte, error)
 
 **Note:** `ValidationOrchestrator.Error()` returns a single `erm.Error` that contains all validation errors as child errors. Use `err.(erm.Error).AllErrors()` to access individual errors if needed.
 
-## Migration from Custom Locale System
+## Migration from External i18n Dependencies
 
-The `WithLocale()` method has been removed. Use `erm.GetLocalizer(language.Tag)` to get localizers for different languages. See [ERM documentation](../erm/README.md#internationalization-setup) for details.
+VIX now uses a custom lightweight i18n package instead of external dependencies:
+
+### **From go-i18n/v2:**
+```go
+// OLD: External go-i18n/v2 dependency
+import "github.com/nicksnyder/go-i18n/v2/i18n"
+
+// NEW: Custom lightweight i18n package
+import "github.com/c3p0-box/utils/i18n"
+```
+
+### **From WithLocale() Method:**
+```go
+// OLD: WithLocale() method (removed)
+validator.WithLocale(language.Spanish).Validate()
+
+// NEW: Use ERM localizer for custom languages
+localizer := erm.GetLocalizer(language.Spanish)
+// Errors are automatically localized when added to i18n
+```
+
+### **Benefits of Migration:**
+- **Reduced Dependencies**: No external i18n dependencies
+- **Better Performance**: Lightweight singleton pattern
+- **Centralized Management**: All messages in one place (`erm/locale.go`)
+- **Type Safety**: Compile-time validation of message keys
 
 ## Best Practices
 

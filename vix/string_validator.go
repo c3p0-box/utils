@@ -69,7 +69,7 @@ func (sv *StringValidator) Unless(condition func() bool) *StringValidator {
 //		Custom(func(value interface{}, fieldName string) error {
 //			str := value.(string)
 //			if strings.HasSuffix(str, "@admin.com") {
-//				return erm.NewValidationError("{{field}} cannot use admin domain", fieldName, value)
+//				return &ValidationError{Message: fieldName + " cannot use admin domain"}
 //			}
 //			return nil
 //		}).
@@ -93,9 +93,9 @@ func (sv *StringValidator) Required() *StringValidator {
 	isValid := !isEmpty(str)
 
 	if !isValid && !sv.negated {
-		sv.addValidationError("required", MsgRequired, nil)
+		sv.addValidationError(erm.MsgRequired, nil)
 	} else if isValid && sv.negated {
-		sv.addValidationError("not_required", "validation.empty", nil)
+		sv.addValidationError(erm.MsgEmpty, nil)
 	}
 
 	sv.negated = false
@@ -112,9 +112,9 @@ func (sv *StringValidator) Empty() *StringValidator {
 	isValid := str == ""
 
 	if !isValid && !sv.negated {
-		sv.addValidationError("required", "validation.empty", nil)
+		sv.addValidationError(erm.MsgEmpty, nil)
 	} else if isValid && sv.negated {
-		sv.addValidationError("not_required", "validation.not_empty", nil)
+		sv.addValidationError(erm.MsgNotEmpty, nil)
 	}
 
 	sv.negated = false
@@ -152,14 +152,14 @@ func (sv *StringValidator) EqualTo(other string, msgTemplate ...string) *StringV
 	if len(msgTemplate) > 0 && msgTemplate[0] != "" {
 		messageKey = msgTemplate[0]
 	} else {
-		messageKey = MsgEqualTo
+		messageKey = erm.MsgEqualTo
 	}
 
 	if !isValid && !sv.negated {
-		sv.addValidationError("equal_to", messageKey,
+		sv.addValidationError(messageKey,
 			map[string]interface{}{"expected": other})
 	} else if isValid && sv.negated {
-		sv.addValidationError("not_equal_to", "validation.not_equal_to",
+		sv.addValidationError(erm.MsgNotEqualTo,
 			map[string]interface{}{"expected": other})
 	}
 
@@ -182,10 +182,10 @@ func (sv *StringValidator) MinLength(min int) *StringValidator {
 	isValid := length >= min
 
 	if !isValid && !sv.negated {
-		sv.addValidationError("min_length", MsgMinLength,
+		sv.addValidationError(erm.MsgMinLength,
 			map[string]interface{}{"min": min})
 	} else if isValid && sv.negated {
-		sv.addValidationError("not_min_length", "validation.not_min_length",
+		sv.addValidationError(erm.MsgNotMinLength,
 			map[string]interface{}{"min": min})
 	}
 
@@ -204,10 +204,10 @@ func (sv *StringValidator) MaxLength(max int) *StringValidator {
 	isValid := length <= max
 
 	if !isValid && !sv.negated {
-		sv.addValidationError("max_length", MsgMaxLength,
+		sv.addValidationError(erm.MsgMaxLength,
 			map[string]interface{}{"max": max})
 	} else if isValid && sv.negated {
-		sv.addValidationError("not_max_length", "validation.not_max_length",
+		sv.addValidationError(erm.MsgNotMaxLength,
 			map[string]interface{}{"max": max})
 	}
 
@@ -226,10 +226,10 @@ func (sv *StringValidator) ExactLength(length int) *StringValidator {
 	isValid := actualLength == length
 
 	if !isValid && !sv.negated {
-		sv.addValidationError("exact_length", MsgExactLength,
+		sv.addValidationError(erm.MsgExactLength,
 			map[string]interface{}{"length": length})
 	} else if isValid && sv.negated {
-		sv.addValidationError("not_exact_length", "validation.not_exact_length",
+		sv.addValidationError(erm.MsgNotExactLength,
 			map[string]interface{}{"length": length})
 	}
 
@@ -248,10 +248,10 @@ func (sv *StringValidator) LengthBetween(min, max int) *StringValidator {
 	isValid := length >= min && length <= max
 
 	if !isValid && !sv.negated {
-		sv.addValidationError("between", MsgBetween,
+		sv.addValidationError(erm.MsgBetween,
 			map[string]interface{}{"min": min, "max": max})
 	} else if isValid && sv.negated {
-		sv.addValidationError("not_between", "validation.not_between",
+		sv.addValidationError(erm.MsgNotBetween,
 			map[string]interface{}{"min": min, "max": max})
 	}
 
@@ -273,9 +273,9 @@ func (sv *StringValidator) Email() *StringValidator {
 	isValid := EmailRegex.MatchString(str)
 
 	if !isValid && !sv.negated {
-		sv.addValidationError("email", MsgEmail, nil)
+		sv.addValidationError(erm.MsgEmail, nil)
 	} else if isValid && sv.negated {
-		sv.addValidationError("not_email", "validation.not_email", nil)
+		sv.addValidationError(erm.MsgNotEmail, nil)
 	}
 
 	sv.negated = false
@@ -292,9 +292,9 @@ func (sv *StringValidator) URL() *StringValidator {
 	isValid := URLRegex.MatchString(str)
 
 	if !isValid && !sv.negated {
-		sv.addValidationError("url", MsgURL, nil)
+		sv.addValidationError(erm.MsgURL, nil)
 	} else if isValid && sv.negated {
-		sv.addValidationError("not_url", "validation.not_url", nil)
+		sv.addValidationError(erm.MsgNotURL, nil)
 	}
 
 	sv.negated = false
@@ -311,9 +311,9 @@ func (sv *StringValidator) Numeric() *StringValidator {
 	valid := str != "" && NumericRegex.MatchString(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("numeric", MsgNumeric, nil)
+		sv.addValidationError(erm.MsgNumeric, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_numeric", "validation.not_numeric", nil)
+		sv.addValidationError(erm.MsgNotNumeric, nil)
 	}
 
 	sv.negated = false
@@ -330,9 +330,9 @@ func (sv *StringValidator) Alpha() *StringValidator {
 	valid := str != "" && AlphaRegex.MatchString(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("alpha", MsgAlpha, nil)
+		sv.addValidationError(erm.MsgAlpha, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_alpha", "validation.not_alpha", nil)
+		sv.addValidationError(erm.MsgNotAlpha, nil)
 	}
 
 	sv.negated = false
@@ -349,9 +349,9 @@ func (sv *StringValidator) AlphaNumeric() *StringValidator {
 	valid := str != "" && AlphaNumericRegex.MatchString(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("alpha_numeric", MsgAlphaNumeric, nil)
+		sv.addValidationError(erm.MsgAlphaNumeric, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_alpha_numeric", "validation.not_alpha_numeric", nil)
+		sv.addValidationError(erm.MsgNotAlphaNumeric, nil)
 	}
 
 	sv.negated = false
@@ -368,10 +368,10 @@ func (sv *StringValidator) Regex(pattern *regexp.Regexp) *StringValidator {
 	valid := pattern.MatchString(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("regex", MsgRegex,
+		sv.addValidationError(erm.MsgRegex,
 			map[string]interface{}{"pattern": pattern.String()})
 	} else if valid && sv.negated {
-		sv.addValidationError("not_regex", "validation.not_regex",
+		sv.addValidationError(erm.MsgNotRegex,
 			map[string]interface{}{"pattern": pattern.String()})
 	}
 
@@ -399,10 +399,10 @@ func (sv *StringValidator) In(values ...string) *StringValidator {
 	}
 
 	if !valid && !sv.negated {
-		sv.addValidationError("in", "{{field}} must be one of: {{values}}",
+		sv.addValidationError(erm.MsgIn,
 			map[string]interface{}{"values": strings.Join(values, ", ")})
 	} else if valid && sv.negated {
-		sv.addValidationError("not_in", "{{field}} must not be one of: {{values}}",
+		sv.addValidationError(erm.MsgNotIn,
 			map[string]interface{}{"values": strings.Join(values, ", ")})
 	}
 
@@ -426,10 +426,10 @@ func (sv *StringValidator) NotIn(values ...string) *StringValidator {
 	}
 
 	if !valid && !sv.negated {
-		sv.addValidationError("not_in", "{{field}} must not be one of: {{values}}",
+		sv.addValidationError(erm.MsgNotIn,
 			map[string]interface{}{"values": strings.Join(values, ", ")})
 	} else if valid && sv.negated {
-		sv.addValidationError("not_not_in", "{{field}} may be one of: {{values}}",
+		sv.addValidationError(erm.MsgIn,
 			map[string]interface{}{"values": strings.Join(values, ", ")})
 	}
 
@@ -451,10 +451,10 @@ func (sv *StringValidator) Contains(substring string) *StringValidator {
 	valid := strings.Contains(str, substring)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("contains", "{{field}} must contain '{{substring}}'",
+		sv.addValidationError(erm.MsgContains,
 			map[string]interface{}{"substring": substring})
 	} else if valid && sv.negated {
-		sv.addValidationError("not_contains", "{{field}} must not contain '{{substring}}'",
+		sv.addValidationError(erm.MsgNotContains,
 			map[string]interface{}{"substring": substring})
 	}
 
@@ -472,10 +472,10 @@ func (sv *StringValidator) StartsWith(prefix string) *StringValidator {
 	valid := strings.HasPrefix(str, prefix)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("starts_with", "{{field}} must start with '{{prefix}}'",
+		sv.addValidationError(erm.MsgStartsWith,
 			map[string]interface{}{"prefix": prefix})
 	} else if valid && sv.negated {
-		sv.addValidationError("not_starts_with", "{{field}} must not start with '{{prefix}}'",
+		sv.addValidationError(erm.MsgNotStartsWith,
 			map[string]interface{}{"prefix": prefix})
 	}
 
@@ -493,10 +493,10 @@ func (sv *StringValidator) EndsWith(suffix string) *StringValidator {
 	valid := strings.HasSuffix(str, suffix)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("ends_with", "{{field}} must end with '{{suffix}}'",
+		sv.addValidationError(erm.MsgEndsWith,
 			map[string]interface{}{"suffix": suffix})
 	} else if valid && sv.negated {
-		sv.addValidationError("not_ends_with", "{{field}} must not end with '{{suffix}}'",
+		sv.addValidationError(erm.MsgNotEndsWith,
 			map[string]interface{}{"suffix": suffix})
 	}
 
@@ -518,9 +518,9 @@ func (sv *StringValidator) Lowercase() *StringValidator {
 	valid := str == strings.ToLower(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("lowercase", "{{field}} must be in lowercase", nil)
+		sv.addValidationError(erm.MsgLowercase, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_lowercase", "{{field}} must not be in lowercase", nil)
+		sv.addValidationError(erm.MsgNotLowercase, nil)
 	}
 
 	sv.negated = false
@@ -537,9 +537,9 @@ func (sv *StringValidator) Uppercase() *StringValidator {
 	valid := str == strings.ToUpper(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("uppercase", "{{field}} must be in uppercase", nil)
+		sv.addValidationError(erm.MsgUppercase, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_uppercase", "{{field}} must not be in uppercase", nil)
+		sv.addValidationError(erm.MsgNotUppercase, nil)
 	}
 
 	sv.negated = false
@@ -561,9 +561,9 @@ func (sv *StringValidator) Integer() *StringValidator {
 	valid := err == nil
 
 	if !valid && !sv.negated {
-		sv.addValidationError("integer", "{{field}} must be a valid integer", nil)
+		sv.addValidationError(erm.MsgInteger, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_integer", "{{field}} must not be a valid integer", nil)
+		sv.addValidationError(erm.MsgNotInteger, nil)
 	}
 
 	sv.negated = false
@@ -581,9 +581,9 @@ func (sv *StringValidator) Float() *StringValidator {
 	valid := err == nil
 
 	if !valid && !sv.negated {
-		sv.addValidationError("float", "{{field}} must be a valid number", nil)
+		sv.addValidationError(erm.MsgFloat, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_float", "{{field}} must not be a valid number", nil)
+		sv.addValidationError(erm.MsgNotFloat, nil)
 	}
 
 	sv.negated = false
@@ -600,9 +600,9 @@ func (sv *StringValidator) JSON() *StringValidator {
 	valid := isValidJSON(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("json", "{{field}} must be valid JSON", nil)
+		sv.addValidationError(erm.MsgJSON, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_json", "{{field}} must not be valid JSON", nil)
+		sv.addValidationError(erm.MsgNotJSON, nil)
 	}
 
 	sv.negated = false
@@ -619,9 +619,9 @@ func (sv *StringValidator) Base64() *StringValidator {
 	valid := isValidBase64(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("base64", "{{field}} must be valid base64", nil)
+		sv.addValidationError(erm.MsgBase64, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_base64", "{{field}} must not be valid base64", nil)
+		sv.addValidationError(erm.MsgNotBase64, nil)
 	}
 
 	sv.negated = false
@@ -638,9 +638,9 @@ func (sv *StringValidator) UUID() *StringValidator {
 	valid := isValidUUID(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("uuid", "{{field}} must be a valid UUID", nil)
+		sv.addValidationError(erm.MsgUUID, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_uuid", "{{field}} must not be a valid UUID", nil)
+		sv.addValidationError(erm.MsgNotUUID, nil)
 	}
 
 	sv.negated = false
@@ -657,25 +657,13 @@ func (sv *StringValidator) Slug() *StringValidator {
 	valid := isValidSlug(str)
 
 	if !valid && !sv.negated {
-		sv.addValidationError("slug", "{{field}} must be a valid slug", nil)
+		sv.addValidationError(erm.MsgSlug, nil)
 	} else if valid && sv.negated {
-		sv.addValidationError("not_slug", "{{field}} must not be a valid slug", nil)
+		sv.addValidationError(erm.MsgNotSlug, nil)
 	}
 
 	sv.negated = false
 	return sv
-}
-
-// validateStringFormat validates string against various format patterns.
-// This function consolidates common string format validation logic.
-func validateStringFormat(value, fieldName string, validators ...func(string) bool) error {
-	str := toString(value)
-	for _, validator := range validators {
-		if !validator(str) {
-			return erm.NewValidationError("{{field}} format is invalid", fieldName, value)
-		}
-	}
-	return nil
 }
 
 // String format validation helper functions

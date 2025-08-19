@@ -2462,9 +2462,9 @@ func TestValidatorEdgeCasesForCoverage(t *testing.T) {
 			t.Error("expected error for value not in list")
 		}
 
-		// Check that we got an error - the exact format may vary based on localization
+		// Check that we got an error - should contain the field name and indicate validation error
 		errorMsg := err.Error()
-		if !strings.Contains(errorMsg, "validation error for field") {
+		if !strings.Contains(errorMsg, "test must be one of:") {
 			t.Errorf("Error message should indicate validation error, got: %s", errorMsg)
 		}
 	})

@@ -504,7 +504,7 @@ func (e *StackError) formatMultipleErrors(messages []string, tag language.Tag) s
 	localizer := GetLocalizer(tag)
 	if localizer != nil {
 		return localizer.MustLocalize(&LocalizeConfig{
-			MessageID: "error.multiple",
+			MessageID: MsgErrorMultiple,
 			TemplateData: map[string]interface{}{
 				"errors": strings.Join(messages, "; "),
 			},
@@ -764,7 +764,7 @@ func Forbidden(msg string, err error) Error {
 // NotFound creates a 404 Not Found error.
 func NotFound(fieldName string, err error) Error {
 	return New(http.StatusNotFound, "", err).
-		WithMessageKey("error.not_found").
+		WithMessageKey(MsgErrorNotFound).
 		WithFieldName(fieldName)
 }
 
@@ -803,44 +803,44 @@ func NewValidationError(messageKey, fieldName string, value interface{}) Error {
 
 // RequiredError creates a "required" validation error.
 func RequiredError(fieldName string, value interface{}) Error {
-	return NewValidationError("validation.required", fieldName, value)
+	return NewValidationError(MsgRequired, fieldName, value)
 }
 
 // MinLengthError creates a "min_length" validation error with minimum length parameter.
 func MinLengthError(fieldName string, value interface{}, min int) Error {
-	return NewValidationError("validation.min_length", fieldName, value).
+	return NewValidationError(MsgMinLength, fieldName, value).
 		WithParam("min", min)
 }
 
 // MaxLengthError creates a "max_length" validation error with maximum length parameter.
 func MaxLengthError(fieldName string, value interface{}, max int) Error {
-	return NewValidationError("validation.max_length", fieldName, value).
+	return NewValidationError(MsgMaxLength, fieldName, value).
 		WithParam("max", max)
 }
 
 // EmailError creates an "email" validation error.
 func EmailError(fieldName string, value interface{}) Error {
-	return NewValidationError("validation.email", fieldName, value)
+	return NewValidationError(MsgEmail, fieldName, value)
 }
 
 // MinValueError creates a "min_value" validation error with minimum value parameter.
 func MinValueError(fieldName string, value interface{}, min interface{}) Error {
-	return NewValidationError("validation.min_value", fieldName, value).
+	return NewValidationError(MsgMin, fieldName, value).
 		WithParam("min", min)
 }
 
 // MaxValueError creates a "max_value" validation error with maximum value parameter.
 func MaxValueError(fieldName string, value interface{}, max interface{}) Error {
-	return NewValidationError("validation.max_value", fieldName, value).
+	return NewValidationError(MsgMax, fieldName, value).
 		WithParam("max", max)
 }
 
 // DuplicateError creates a "duplicate" validation error for unique constraint violations.
 func DuplicateError(fieldName string, value interface{}) Error {
-	return NewValidationError("validation.duplicate", fieldName, value)
+	return NewValidationError(MsgDuplicate, fieldName, value)
 }
 
 // InvalidError creates an "invalid" validation error for general invalid values.
 func InvalidError(fieldName string, value interface{}) Error {
-	return NewValidationError("validation.invalid", fieldName, value)
+	return NewValidationError(MsgInvalid, fieldName, value)
 }

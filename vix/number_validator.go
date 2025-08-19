@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/c3p0-box/utils/erm"
 )
 
 // =============================================================================
@@ -95,9 +97,9 @@ func (nv *NumberValidator[T]) Required() *NumberValidator[T] {
 	isZero := nv.value == 0
 
 	if isZero && !nv.negated {
-		nv.addValidationError("required", MsgRequired, nil)
+		nv.addValidationError(erm.MsgRequired, nil)
 	} else if !isZero && nv.negated {
-		nv.addValidationError("not_required", "validation.must_be_zero", nil)
+		nv.addValidationError(erm.MsgMustBeZero, nil)
 	}
 
 	nv.negated = false
@@ -113,9 +115,9 @@ func (nv *NumberValidator[T]) Zero() *NumberValidator[T] {
 	isZero := nv.value == 0
 
 	if !isZero && !nv.negated {
-		nv.addValidationError("zero", "{{field}} must be zero", nil)
+		nv.addValidationError(erm.MsgZero, nil)
 	} else if isZero && nv.negated {
-		nv.addValidationError("not_zero", "{{field}} must not be zero", nil)
+		nv.addValidationError(erm.MsgNotZero, nil)
 	}
 
 	nv.negated = false
@@ -131,10 +133,10 @@ func (nv *NumberValidator[T]) Min(min T) *NumberValidator[T] {
 	valid := nv.value >= min
 
 	if !valid && !nv.negated {
-		nv.addValidationError("min", MsgMin,
+		nv.addValidationError(erm.MsgMin,
 			map[string]interface{}{"min": min, "value": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_min", "validation.not_min_value",
+		nv.addValidationError(erm.MsgNotMinValue,
 			map[string]interface{}{"min": min, "value": nv.value})
 	}
 
@@ -151,10 +153,10 @@ func (nv *NumberValidator[T]) Max(max T) *NumberValidator[T] {
 	valid := nv.value <= max
 
 	if !valid && !nv.negated {
-		nv.addValidationError("max", MsgMax,
+		nv.addValidationError(erm.MsgMax,
 			map[string]interface{}{"max": max, "value": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_max", "validation.not_max_value",
+		nv.addValidationError(erm.MsgNotMaxValue,
 			map[string]interface{}{"max": max, "value": nv.value})
 	}
 
@@ -171,10 +173,10 @@ func (nv *NumberValidator[T]) Between(min, max T) *NumberValidator[T] {
 	valid := nv.value >= min && nv.value <= max
 
 	if !valid && !nv.negated {
-		nv.addValidationError("between", "{{field}} must be between {{min}} and {{max}}",
+		nv.addValidationError(erm.MsgBetween,
 			map[string]interface{}{"min": min, "max": max, "value": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_between", "{{field}} must not be between {{min}} and {{max}}",
+		nv.addValidationError(erm.MsgNotBetween,
 			map[string]interface{}{"min": min, "max": max, "value": nv.value})
 	}
 
@@ -191,10 +193,10 @@ func (nv *NumberValidator[T]) Equal(expected T) *NumberValidator[T] {
 	valid := nv.value == expected
 
 	if !valid && !nv.negated {
-		nv.addValidationError("equal", "{{field}} must equal {{expected}}",
+		nv.addValidationError(erm.MsgEqual,
 			map[string]interface{}{"expected": expected, "value": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_equal", "{{field}} must not equal {{expected}}",
+		nv.addValidationError(erm.MsgNotEqualTo,
 			map[string]interface{}{"expected": expected, "value": nv.value})
 	}
 
@@ -232,14 +234,14 @@ func (nv *NumberValidator[T]) EqualTo(expected T, msgTemplate ...string) *Number
 	if len(msgTemplate) > 0 && msgTemplate[0] != "" {
 		messageKey = msgTemplate[0]
 	} else {
-		messageKey = MsgEqualTo
+		messageKey = erm.MsgEqualTo
 	}
 
 	if !valid && !nv.negated {
-		nv.addValidationError("equal_to", messageKey,
+		nv.addValidationError(messageKey,
 			map[string]interface{}{"expected": expected, "value": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_equal_to", "validation.not_equal_to",
+		nv.addValidationError(erm.MsgNotEqualTo,
 			map[string]interface{}{"expected": expected, "value": nv.value})
 	}
 
@@ -256,10 +258,10 @@ func (nv *NumberValidator[T]) GreaterThan(value T) *NumberValidator[T] {
 	valid := nv.value > value
 
 	if !valid && !nv.negated {
-		nv.addValidationError("greater_than", "{{field}} must be greater than {{value}}",
+		nv.addValidationError(erm.MsgGreaterThan,
 			map[string]interface{}{"value": value, "actual": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_greater_than", "{{field}} must not be greater than {{value}}",
+		nv.addValidationError(erm.MsgNotGreaterThan,
 			map[string]interface{}{"value": value, "actual": nv.value})
 	}
 
@@ -276,10 +278,10 @@ func (nv *NumberValidator[T]) LessThan(value T) *NumberValidator[T] {
 	valid := nv.value < value
 
 	if !valid && !nv.negated {
-		nv.addValidationError("less_than", "{{field}} must be less than {{value}}",
+		nv.addValidationError(erm.MsgLessThan,
 			map[string]interface{}{"value": value, "actual": nv.value})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_less_than", "{{field}} must not be less than {{value}}",
+		nv.addValidationError(erm.MsgNotLessThan,
 			map[string]interface{}{"value": value, "actual": nv.value})
 	}
 
@@ -296,9 +298,9 @@ func (nv *NumberValidator[T]) Positive() *NumberValidator[T] {
 	valid := nv.value > 0
 
 	if !valid && !nv.negated {
-		nv.addValidationError("positive", "{{field}} must be positive", nil)
+		nv.addValidationError(erm.MsgPositive, nil)
 	} else if valid && nv.negated {
-		nv.addValidationError("not_positive", "{{field}} must not be positive", nil)
+		nv.addValidationError(erm.MsgNotPositive, nil)
 	}
 
 	nv.negated = false
@@ -314,9 +316,9 @@ func (nv *NumberValidator[T]) Negative() *NumberValidator[T] {
 	valid := nv.value < 0
 
 	if !valid && !nv.negated {
-		nv.addValidationError("negative", "{{field}} must be negative", nil)
+		nv.addValidationError(erm.MsgNegative, nil)
 	} else if valid && nv.negated {
-		nv.addValidationError("not_negative", "{{field}} must not be negative", nil)
+		nv.addValidationError(erm.MsgNotNegative, nil)
 	}
 
 	nv.negated = false
@@ -338,10 +340,10 @@ func (nv *NumberValidator[T]) In(values ...T) *NumberValidator[T] {
 	}
 
 	if !valid && !nv.negated {
-		nv.addValidationError("in", "{{field}} must be one of: {{values}}",
+		nv.addValidationError(erm.MsgIn,
 			map[string]interface{}{"values": formatValues(values)})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_in", "{{field}} must not be one of: {{values}}",
+		nv.addValidationError(erm.MsgNotIn,
 			map[string]interface{}{"values": formatValues(values)})
 	}
 
@@ -364,10 +366,10 @@ func (nv *NumberValidator[T]) NotIn(values ...T) *NumberValidator[T] {
 	}
 
 	if !valid && !nv.negated {
-		nv.addValidationError("not_in", "{{field}} must not be one of: {{values}}",
+		nv.addValidationError(erm.MsgNotIn,
 			map[string]interface{}{"values": formatValues(values)})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_not_in", "{{field}} may be one of: {{values}}",
+		nv.addValidationError(erm.MsgIn,
 			map[string]interface{}{"values": formatValues(values)})
 	}
 
@@ -382,7 +384,7 @@ func (nv *NumberValidator[T]) MultipleOf(divisor T) *NumberValidator[T] {
 	}
 
 	if divisor == 0 {
-		nv.addValidationError("invalid_divisor", "{{field}} divisor cannot be zero", nil)
+		nv.addValidationError(erm.MsgDivisorZero, nil)
 		return nv
 	}
 
@@ -397,10 +399,10 @@ func (nv *NumberValidator[T]) MultipleOf(divisor T) *NumberValidator[T] {
 	}
 
 	if !valid && !nv.negated {
-		nv.addValidationError("multiple_of", "{{field}} must be a multiple of {{divisor}}",
+		nv.addValidationError(erm.MsgMultipleOf,
 			map[string]interface{}{"divisor": divisor})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_multiple_of", "{{field}} must not be a multiple of {{divisor}}",
+		nv.addValidationError(erm.MsgNotMultipleOf,
 			map[string]interface{}{"divisor": divisor})
 	}
 
@@ -417,9 +419,9 @@ func (nv *NumberValidator[T]) Even() *NumberValidator[T] {
 	valid := int64(nv.value)%2 == 0
 
 	if !valid && !nv.negated {
-		nv.addValidationError("even", "{{field}} must be even", nil)
+		nv.addValidationError(erm.MsgEven, nil)
 	} else if valid && nv.negated {
-		nv.addValidationError("not_even", "{{field}} must not be even", nil)
+		nv.addValidationError(erm.MsgNotEven, nil)
 	}
 
 	nv.negated = false
@@ -435,9 +437,9 @@ func (nv *NumberValidator[T]) Odd() *NumberValidator[T] {
 	valid := int64(nv.value)%2 != 0
 
 	if !valid && !nv.negated {
-		nv.addValidationError("odd", "{{field}} must be odd", nil)
+		nv.addValidationError(erm.MsgOdd, nil)
 	} else if valid && nv.negated {
-		nv.addValidationError("not_odd", "{{field}} must not be odd", nil)
+		nv.addValidationError(erm.MsgNotOdd, nil)
 	}
 
 	nv.negated = false
@@ -462,9 +464,9 @@ func (nv *NumberValidator[T]) Finite() *NumberValidator[T] {
 	}
 
 	if !valid && !nv.negated {
-		nv.addValidationError("finite", "{{field}} must be finite", nil)
+		nv.addValidationError(erm.MsgFinite, nil)
 	} else if valid && nv.negated {
-		nv.addValidationError("not_finite", "{{field}} must not be finite", nil)
+		nv.addValidationError(erm.MsgNotFinite, nil)
 	}
 
 	nv.negated = false
@@ -504,10 +506,10 @@ func (nv *NumberValidator[T]) Precision(places int) *NumberValidator[T] {
 	}
 
 	if !valid && !nv.negated {
-		nv.addValidationError("precision", "{{field}} must have at most {{places}} decimal places",
+		nv.addValidationError(erm.MsgPrecision,
 			map[string]interface{}{"places": places})
 	} else if valid && nv.negated {
-		nv.addValidationError("not_precision", "{{field}} must not have {{places}} decimal places",
+		nv.addValidationError(erm.MsgNotPrecision,
 			map[string]interface{}{"places": places})
 	}
 

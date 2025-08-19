@@ -1,7 +1,7 @@
 // Package vix provides a type-safe, expressive, and extensible validation
 // library for Go. It follows clean architecture principles and integrates
 // seamlessly with the ERM centralized error management package for unified error handling
-// and error collection with standard i18n support.
+// and error collection with custom lightweight i18n support.
 //
 // Unlike tag-based validation libraries, this package uses function chaining
 // to create readable and maintainable validation rules. The package supports
@@ -12,6 +12,18 @@
 // All validation errors are now unified under the erm.Error interface, providing
 // consistent error handling across application and validation layers with
 // on-demand localization support.
+//
+// # Message Constants Architecture
+//
+// VIX uses centralized message constants defined in the ERM package (erm.Msg* constants)
+// to ensure type safety and avoid hardcoded strings. All validation messages are managed
+// by ERM's localization system, providing consistent internationalization across the entire
+// validation framework.
+//
+// Example usage:
+//
+//	err := vix.String("", "email").Required().Validate()
+//	// Uses erm.MsgRequired internally for localized error messages
 //
 // # Quick Start
 //
@@ -256,7 +268,7 @@ func (bv *BaseValidator) shouldValidate() bool {
 
 // addValidationError adds a validation error, handling negation.
 // Uses message keys for internationalization instead of templates.
-func (bv *BaseValidator) addValidationError(code, messageKey string, params map[string]interface{}) {
+func (bv *BaseValidator) addValidationError(messageKey string, params map[string]interface{}) {
 	if !bv.shouldValidate() {
 		return
 	}
@@ -338,53 +350,6 @@ func (bv *BaseValidator) Custom(fn func(value interface{}, fieldName string) err
 // =============================================================================
 // Constants and Patterns
 // =============================================================================
-
-// Common validation message keys for i18n
-const (
-	MsgRequired      = "validation.required"
-	MsgEmpty         = "validation.empty"
-	MsgMinLength     = "validation.min_length"
-	MsgMaxLength     = "validation.max_length"
-	MsgExactLength   = "validation.exact_length"
-	MsgLengthBetween = "validation.length_between"
-	MsgEmail         = "validation.email"
-	MsgURL           = "validation.url"
-	MsgNumeric       = "validation.numeric"
-	MsgAlpha         = "validation.alpha"
-	MsgAlphaNumeric  = "validation.alpha_numeric"
-	MsgRegex         = "validation.regex"
-	MsgIn            = "validation.in"
-	MsgNotIn         = "validation.not_in"
-	MsgContains      = "validation.contains"
-	MsgStartsWith    = "validation.starts_with"
-	MsgEndsWith      = "validation.ends_with"
-	MsgLowercase     = "validation.lowercase"
-	MsgUppercase     = "validation.uppercase"
-	MsgInteger       = "validation.integer"
-	MsgFloat         = "validation.float"
-	MsgJSON          = "validation.json"
-	MsgBase64        = "validation.base64"
-	MsgUUID          = "validation.uuid"
-	MsgSlug          = "validation.slug"
-	MsgMin           = "validation.min_value"
-	MsgMax           = "validation.max_value"
-	MsgBetween       = "validation.between"
-	MsgZero          = "validation.zero"
-	MsgEqual         = "validation.equal"
-	MsgEqualTo       = "validation.equal_to"
-	MsgGreaterThan   = "validation.greater_than"
-	MsgLessThan      = "validation.less_than"
-	MsgPositive      = "validation.positive"
-	MsgNegative      = "validation.negative"
-	MsgEven          = "validation.even"
-	MsgOdd           = "validation.odd"
-	MsgMultipleOf    = "validation.multiple_of"
-	MsgFinite        = "validation.finite"
-	MsgPrecision     = "validation.precision"
-	MsgAfter         = "validation.after"
-	MsgBefore        = "validation.before"
-	MsgDateFormat    = "validation.date_format"
-)
 
 // Common validation patterns
 var (
