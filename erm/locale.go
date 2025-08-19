@@ -1,131 +1,141 @@
 // Package erm provides localization and internationalization utilities
-// using the standard github.com/nicksnyder/go-i18n/v2/i18n package.
+// using the custom github.com/c3p0-box/utils/i18n package.
 //
 // This file contains the localization infrastructure for the ERM error
 // management system, providing on-demand message resolution and
-// per-language localizer management.
+// per-language translation management.
 package erm
 
 import (
 	"sync"
 
-	"github.com/nicksnyder/go-i18n/v2/i18n"
+	"github.com/c3p0-box/utils/i18n"
 	"golang.org/x/text/language"
 )
 
 // Global internationalization state
 var (
-	// localizers stores per-language localizers, created on demand
-	localizers map[language.Tag]*i18n.Localizer
-	// localizerMutex protects concurrent access to localizers map
-	localizerMutex sync.RWMutex
+	// initOnce ensures messages are only initialized once
+	initOnce sync.Once
 )
 
 func init() {
-	localizers = make(map[language.Tag]*i18n.Localizer)
+	// Initialize all translation messages on package load
+	initOnce.Do(initializeMessages)
 }
 
 // GetLocalizer returns a localizer for the specified language.
-// If no localizer exists for the language, it creates one with English messages as fallback.
-// For unsupported languages, it creates a bundle with English messages.
+// This function maintains backward compatibility with the old API but now
+// uses our custom i18n package internally.
+// For unsupported languages, it will fall back to English messages.
 // It's safe to call this method concurrently.
-func GetLocalizer(tag language.Tag) *i18n.Localizer {
-	// First try to get existing localizer with read lock
-	localizerMutex.RLock()
-	if localizer, exists := localizers[tag]; exists {
-		localizerMutex.RUnlock()
-		return localizer
-	}
-	localizerMutex.RUnlock()
-
-	// Need to create new localizer, acquire write lock
-	localizerMutex.Lock()
-	defer localizerMutex.Unlock()
-
-	// Double-check in case another goroutine created it while we were waiting
-	if localizer, exists := localizers[tag]; exists {
-		return localizer
-	}
-
-	// Create bundle for the requested language with English messages as fallback
-	bundle := createBundleForLanguage(tag)
-	localizer := i18n.NewLocalizer(bundle, tag.String(), language.English.String())
-	localizers[tag] = localizer
-	return localizer
+func GetLocalizer(tag language.Tag) *Localizer {
+	return &Localizer{language: tag}
 }
 
-// createBundleForLanguage creates a bundle for the specified language.
-// Currently, all bundles contain English messages. In the future, this can be
-// extended to load language-specific message files.
-func createBundleForLanguage(tag language.Tag) *i18n.Bundle {
-	// Always use English as the bundle's default language to ensure proper fallback
-	// The localizer will handle language preference and fallback
-	bundle := i18n.NewBundle(language.English)
-
-	// Add English messages to all bundles
-	addEnglishMessages(bundle)
-
-	// TODO: In the future, we can load language-specific messages here
-	// For example:
-	// if tag == language.Spanish {
-	//     addSpanishMessages(bundle)
-	// }
-
-	return bundle
+// Localizer is a compatibility wrapper that provides the same API as go-i18n's Localizer
+// but uses our custom i18n package internally.
+type Localizer struct {
+	language language.Tag
 }
 
-// addEnglishMessages adds standard English validation messages to a bundle
-func addEnglishMessages(bundle *i18n.Bundle) {
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.required",
-		Other: "{{.field}} is required",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.min_length",
-		Other: "{{.field}} must be at least {{.min}} characters long",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.max_length",
-		Other: "{{.field}} must be at most {{.max}} characters long",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.email",
-		Other: "{{.field}} must be a valid email address",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.min_value",
-		Other: "{{.field}} must be at least {{.min}}",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.max_value",
-		Other: "{{.field}} must be at most {{.max}}",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.invalid",
-		Other: "{{.field}} value is invalid",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.empty",
-		Other: "{{.field}} must be empty",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.not_empty",
-		Other: "{{.field}} must not be empty",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "validation.duplicate",
-		Other: "{{.field}} already exists, another record has the same value",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "error.multiple",
-		Other: "multiple errors: {{.errors}}",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "error.not_found",
-		Other: "{{.field}} is not found",
-	})
-	bundle.AddMessages(language.English, &i18n.Message{
-		ID:    "error.unknown",
-		Other: "unknown error",
-	})
+// Localize translates a message using our custom i18n package.
+// It maintains the same API as go-i18n's Localizer.Localize method.
+func (l *Localizer) Localize(config *LocalizeConfig) (string, error) {
+	if config == nil {
+		return "", nil
+	}
+
+	result := i18n.Translate(l.language, config.MessageID, 1, config.TemplateData)
+	if result == config.MessageID {
+		// Translation not found - return empty string to match go-i18n behavior
+		return "", nil
+	}
+	return result, nil
+}
+
+// MustLocalize translates a message and returns the result or the message ID if translation fails.
+// It maintains the same API as go-i18n's Localizer.MustLocalize method.
+func (l *Localizer) MustLocalize(config *LocalizeConfig) string {
+	if config == nil {
+		return ""
+	}
+
+	return i18n.Translate(l.language, config.MessageID, 1, config.TemplateData)
+}
+
+// LocalizeConfig provides the configuration for message localization.
+// It maintains the same structure as go-i18n's LocalizeConfig.
+type LocalizeConfig struct {
+	MessageID    string
+	TemplateData interface{}
+}
+
+// initializeMessages adds all standard validation messages to our custom i18n package
+func initializeMessages() {
+	// Set English as the default language
+	i18n.SetDefaultLanguage(language.English)
+
+	// Add all English validation messages
+	messages := map[string]*i18n.Translation{
+		"validation.required": {
+			Singular: "{{.field}} is required",
+			Plural:   "",
+		},
+		"validation.min_length": {
+			Singular: "{{.field}} must be at least {{.min}} characters long",
+			Plural:   "",
+		},
+		"validation.max_length": {
+			Singular: "{{.field}} must be at most {{.max}} characters long",
+			Plural:   "",
+		},
+		"validation.email": {
+			Singular: "{{.field}} must be a valid email address",
+			Plural:   "",
+		},
+		"validation.min_value": {
+			Singular: "{{.field}} must be at least {{.min}}",
+			Plural:   "",
+		},
+		"validation.max_value": {
+			Singular: "{{.field}} must be at most {{.max}}",
+			Plural:   "",
+		},
+		"validation.invalid": {
+			Singular: "{{.field}} value is invalid",
+			Plural:   "",
+		},
+		"validation.empty": {
+			Singular: "{{.field}} must be empty",
+			Plural:   "",
+		},
+		"validation.not_empty": {
+			Singular: "{{.field}} must not be empty",
+			Plural:   "",
+		},
+		"validation.duplicate": {
+			Singular: "{{.field}} already exists, another record has the same value",
+			Plural:   "",
+		},
+		"error.multiple": {
+			Singular: "multiple errors: {{.errors}}",
+			Plural:   "",
+		},
+		"error.not_found": {
+			Singular: "{{.field}} is not found",
+			Plural:   "",
+		},
+		"error.unknown": {
+			Singular: "unknown error",
+			Plural:   "",
+		},
+	}
+
+	// Add all messages to the i18n package for English
+	err := i18n.AddTranslations(language.English, messages)
+	if err != nil {
+		// This should never happen with valid messages, but handle gracefully
+		panic("Failed to initialize ERM validation messages: " + err.Error())
+	}
 }

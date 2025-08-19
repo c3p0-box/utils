@@ -146,7 +146,7 @@ func NewMux() *Mux {
 	return &Mux{
 		mux: http.NewServeMux(),
 		errHandler: func(ctx *HttpContext, err error) {
-			ctx.JSON(500, map[string]string{"error": "Internal Server Error"})
+			_ = ctx.String(http.StatusInternalServerError, "Something went wrong")
 		},
 	}
 }

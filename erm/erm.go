@@ -4,7 +4,7 @@
 // and error collection support for handling multiple related errors, serving as a unified
 // error management system for both application and validation errors.
 //
-// The package follows KISS and SOLID principles, uses standard go-i18n for internationalization,
+// The package follows KISS and SOLID principles, uses custom i18n package for internationalization,
 // and provides a clean API for error propagation across application layers. It unifies
 // general application errors and validation errors under a single, consistent interface.
 //
@@ -26,16 +26,16 @@
 //
 // # Validation Error Usage
 //
-//	// Create validation errors with message keys
-//	err := erm.NewValidationError("validation.required", "email", "")
-//	err = err.WithParam("min", 5)
+//		// Create validation errors with message keys
+//		err := erm.NewValidationError("validation.required", "email", "")
+//		err = err.WithParam("min", 5)
 //
-//	// Use convenience constructors for common validations
-//	err := erm.RequiredError("email", "")
-//	err := erm.MinLengthError("password", "123", 8)
+//		// Use convenience constructors for common validations
+//		err := erm.RequiredError("email", "")
+//		err := erm.MinLengthError("password", "123", 8)
 //
-//	// Localized formatting with standard go-i18n
-//	fmt.Println(err.Error()) // "email is required" or localized message
+//	 Localized formatting with custom i18n package
+//		fmt.Println(err.Error()) // "email is required" or localized message
 //
 // # Error Collection Usage
 //
@@ -46,9 +46,9 @@
 //
 // # Internationalization
 //
-// The package uses the standard github.com/nicksnyder/go-i18n/v2/i18n package
+// The package uses the custom github.com/c3p0-box/utils/i18n package
 // for internationalization. Messages are resolved on-demand when Error() or
-// ToError() methods are called, using the configured default localizer.
+// ToError() methods are called, using the internally managed localizers.
 //
 //	// Get localized error messages for different languages
 //	englishMsg := err.LocalizedError(language.English)
@@ -67,7 +67,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"golang.org/x/text/language"
 )
 
@@ -345,9 +344,9 @@ func (e *StackError) WithMessageKey(messageKey string) Error {
 	if e == nil {
 		return nil
 	}
-	new := *e
-	new.messageKey = messageKey
-	return &new
+	err := *e
+	err.messageKey = messageKey
+	return &err
 }
 
 // WithFieldName sets the field name being validated.
@@ -355,9 +354,9 @@ func (e *StackError) WithFieldName(fieldName string) Error {
 	if e == nil {
 		return nil
 	}
-	new := *e
-	new.fieldName = fieldName
-	return &new
+	err := *e
+	err.fieldName = fieldName
+	return &err
 }
 
 // WithValue sets the value being validated.
@@ -365,9 +364,9 @@ func (e *StackError) WithValue(value interface{}) Error {
 	if e == nil {
 		return nil
 	}
-	new := *e
-	new.value = value
-	return &new
+	err := *e
+	err.value = value
+	return &err
 }
 
 // WithParam adds a template parameter.
@@ -375,19 +374,19 @@ func (e *StackError) WithParam(key string, value interface{}) Error {
 	if e == nil {
 		return nil
 	}
-	new := *e
-	if new.params == nil {
-		new.params = make(map[string]interface{})
+	err := *e
+	if err.params == nil {
+		err.params = make(map[string]interface{})
 	} else {
 		// Copy the params map to avoid modifying the original
 		newParams := make(map[string]interface{})
-		for k, v := range new.params {
+		for k, v := range err.params {
 			newParams[k] = v
 		}
-		new.params = newParams
+		err.params = newParams
 	}
-	new.params[key] = value
-	return &new
+	err.params[key] = value
+	return &err
 }
 
 // =============================================================================
@@ -504,7 +503,7 @@ func (e *StackError) formatChildErrors(tag language.Tag) string {
 func (e *StackError) formatMultipleErrors(messages []string, tag language.Tag) string {
 	localizer := GetLocalizer(tag)
 	if localizer != nil {
-		return localizer.MustLocalize(&i18n.LocalizeConfig{
+		return localizer.MustLocalize(&LocalizeConfig{
 			MessageID: "error.multiple",
 			TemplateData: map[string]interface{}{
 				"errors": strings.Join(messages, "; "),
@@ -522,7 +521,7 @@ func (e *StackError) localizeMessage(tag language.Tag) string {
 	}
 
 	templateData := e.buildTemplateData()
-	msg, err := localizer.Localize(&i18n.LocalizeConfig{
+	msg, err := localizer.Localize(&LocalizeConfig{
 		MessageID:    e.messageKey,
 		TemplateData: templateData,
 	})

@@ -23,12 +23,26 @@ func TestGetLocalizer(t *testing.T) {
 		}
 	})
 
-	t.Run("GetLocalizer with same language returns same localizer", func(t *testing.T) {
+	t.Run("GetLocalizer with same language returns equivalent localizers", func(t *testing.T) {
 		localizer1 := GetLocalizer(language.English)
 		localizer2 := GetLocalizer(language.English)
 
-		if localizer1 != localizer2 {
-			t.Error("GetLocalizer should return the same localizer for the same language")
+		// New implementation returns new instances but with same language
+		if localizer1.language != localizer2.language {
+			t.Error("GetLocalizer should return localizers for the same language")
+		}
+
+		// Verify they produce the same results
+		config := &LocalizeConfig{
+			MessageID:    "validation.required",
+			TemplateData: map[string]interface{}{"field": "email"},
+		}
+
+		result1 := localizer1.MustLocalize(config)
+		result2 := localizer2.MustLocalize(config)
+
+		if result1 != result2 {
+			t.Errorf("Localizers should produce same results, got %q and %q", result1, result2)
 		}
 	})
 

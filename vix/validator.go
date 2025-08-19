@@ -5,8 +5,8 @@
 //
 // Unlike tag-based validation libraries, this package uses function chaining
 // to create readable and maintainable validation rules. The package supports
-// type-safe validation with Go generics, internationalization using the standard
-// go-i18n package through ERM integration, conditional validation, and comprehensive
+// type-safe validation with Go generics, internationalization using the custom
+// i18n package through ERM integration, conditional validation, and comprehensive
 // error reporting suitable for modern APIs.
 //
 // All validation errors are now unified under the erm.Error interface, providing

@@ -753,8 +753,6 @@ func TestNumberValidatorMultipleOf(t *testing.T) {
 }
 
 func TestLocalization(t *testing.T) {
-	erm.SetupTestLocalizer() // Use shared test helper
-
 	// Test default locale
 	englishResult := String("", "name").Required().Result()
 	err := englishResult.Error()
@@ -933,8 +931,6 @@ func TestGenericNumberValidation(t *testing.T) {
 }
 
 func TestErrorMessages(t *testing.T) {
-	erm.SetupTestLocalizer() // Use shared test helper
-
 	// Test with field name
 	err := String("", "username").Required().Validate()
 	if err == nil {
@@ -985,8 +981,6 @@ func TestComplexValidationScenarios(t *testing.T) {
 
 // TestStringValidatorEmpty tests the Empty validation rule
 func TestStringValidatorEmpty(t *testing.T) {
-	erm.SetupTestLocalizer() // Use shared test helper
-
 	tests := []struct {
 		name      string
 		value     string
@@ -1805,8 +1799,6 @@ func TestNumberTypeValidators(t *testing.T) {
 
 // TestValidationResultMethods tests ValidationResult methods
 func TestValidationResultMethods(t *testing.T) {
-	setupLocalizer() // Set up localizer for tests
-
 	t.Run("NewValidationResult with empty field name", func(t *testing.T) {
 		result := NewValidationResult("test", "")
 		if result.FieldName != "value" {
@@ -2087,8 +2079,6 @@ func TestComplexValidationChains(t *testing.T) {
 
 // TestValidatorToError tests ToError() method integration with validators
 func TestValidatorToError(t *testing.T) {
-	setupLocalizer() // Set up localizer for tests
-
 	t.Run("String validator ToError", func(t *testing.T) {
 		// Test valid string
 		result := String("test@example.com", "email").Required().Email().Result()
@@ -2300,8 +2290,6 @@ func TestValidationChaining(t *testing.T) {
 
 // TestErrorMessageFormatting tests error message formatting edge cases
 func TestErrorMessageFormatting(t *testing.T) {
-	setupLocalizer() // Set up localizer for tests
-
 	t.Run("Error message with special characters", func(t *testing.T) {
 		fieldName := "field_with_underscores"
 		err := String("", fieldName).Required().Validate()

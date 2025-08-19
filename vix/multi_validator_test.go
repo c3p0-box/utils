@@ -9,12 +9,6 @@ import (
 	"golang.org/x/text/language"
 )
 
-// setupLocalizer sets up the default localizer for tests
-// This is a simplified version that uses the erm package's test helper
-func setupLocalizer() {
-	erm.SetupTestLocalizer()
-}
-
 // =============================================================================
 // ValidationOrchestrator Core Tests
 // =============================================================================
@@ -110,8 +104,6 @@ func TestValidationOrchestrator_IsValid(t *testing.T) {
 }
 
 func TestValidationOrchestrator_ToError(t *testing.T) {
-	setupLocalizer() // Set up localizer for tests
-
 	t.Run("valid orchestrator returns nil", func(t *testing.T) {
 		orchestrator := Is(
 			String("test@example.com", "email").Required().Email(),
@@ -330,8 +322,6 @@ func TestValidationOrchestrator_GetFieldResult(t *testing.T) {
 }
 
 func TestValidationOrchestrator_String(t *testing.T) {
-	setupLocalizer() // Set up localizer for tests
-
 	t.Run("valid orchestrator", func(t *testing.T) {
 		orchestrator := Is(
 			String("test@example.com", "email").Required().Email(),
@@ -362,8 +352,6 @@ func TestValidationOrchestrator_String(t *testing.T) {
 }
 
 func TestValidationOrchestrator_Error(t *testing.T) {
-	setupLocalizer() // Set up localizer for tests
-
 	orchestrator := Is(
 		String("", "email").Required(),
 		Int(16, "age").Required().Min(18),
