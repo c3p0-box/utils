@@ -5,13 +5,10 @@ package env
 
 import (
 	"encoding"
-	"flag"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -90,8 +87,6 @@ func ReadEnv(cfg interface{}) error {
 func UpdateEnv(cfg interface{}) error {
 	return readEnvVars(cfg, true)
 }
-
-// (All file parsing helpers were intentionally removed. This package now only reads OS environment variables.)
 
 // parseSlice parses value into a slice of given type
 func parseSlice(valueType reflect.Type, value string, sep string, layout *string) (*reflect.Value, error) {
@@ -177,7 +172,7 @@ var validStructs = map[reflect.Type]parseFunc{
 		return nil
 	},
 
-	reflect.TypeOf(url.URL{}): func(field *reflect.Value, value string, _ *string) error {
+	reflect.TypeOf(url.URL{}): func(field *reflect.Value, value string, layout *string) error {
 		val, err := url.Parse(value)
 		if err != nil {
 			return err
@@ -186,7 +181,7 @@ var validStructs = map[reflect.Type]parseFunc{
 		return nil
 	},
 
-	reflect.TypeOf(&time.Location{}): func(field *reflect.Value, value string, _ *string) error {
+	reflect.TypeOf(&time.Location{}): func(field *reflect.Value, value string, layout *string) error {
 		loc, err := time.LoadLocation(value)
 		if err != nil {
 			return err
@@ -366,8 +361,6 @@ func readEnvVars(cfg interface{}, update bool) error {
 // parseValue parses value into the corresponding field.
 // In case of maps and slices it uses provided separator to split raw value string
 func parseValue(field reflect.Value, value, sep string, layout *string) error {
-	// TODO: simplify recursion
-
 	valueType := field.Type()
 
 	// look for supported struct parser
@@ -469,78 +462,4 @@ func parseValue(field reflect.Value, value, sep string, layout *string) error {
 	}
 
 	return nil
-}
-
-// GetDescription returns a description of environment variables.
-// You can provide a custom header text.
-func GetDescription(cfg interface{}, headerText *string) (string, error) {
-	meta, err := readStructMetadata(cfg)
-	if err != nil {
-		return "", err
-	}
-
-	var header string
-
-	if headerText != nil {
-		header = *headerText
-	} else {
-		header = "Environment variables:"
-	}
-
-	description := make([]string, 0)
-
-	for _, m := range meta {
-		if len(m.envList) == 0 {
-			continue
-		}
-
-		for idx, env := range m.envList {
-
-			elemDescription := fmt.Sprintf("\n  %s %s", env, m.fieldValue.Kind())
-			if idx > 0 {
-				elemDescription += fmt.Sprintf(" (alternative to %s)", m.envList[0])
-			}
-			elemDescription += fmt.Sprintf("\n    \t%s", m.description)
-			if m.defValue != nil {
-				elemDescription += fmt.Sprintf(" (default %q)", *m.defValue)
-			}
-			description = append(description, elemDescription)
-		}
-	}
-
-	if len(description) == 0 {
-		return "", nil
-	}
-
-	sort.Strings(description)
-
-	return header + strings.Join(description, ""), nil
-}
-
-// Usage returns a configuration usage help.
-// Other usage instructions can be wrapped in and executed before this usage function.
-// The default output is STDERR.
-func Usage(cfg interface{}, headerText *string, usageFuncs ...func()) func() {
-	return FUsage(os.Stderr, cfg, headerText, usageFuncs...)
-}
-
-// FUsage prints configuration help into the custom output.
-// Other usage instructions can be wrapped in and executed before this usage function
-func FUsage(w io.Writer, cfg interface{}, headerText *string, usageFuncs ...func()) func() {
-	return func() {
-		for _, fn := range usageFuncs {
-			fn()
-		}
-
-		_ = flag.Usage
-
-		text, err := GetDescription(cfg, headerText)
-		if err != nil {
-			return
-		}
-		if len(usageFuncs) > 0 {
-			fmt.Fprintln(w)
-		}
-		fmt.Fprintln(w, text)
-	}
 }

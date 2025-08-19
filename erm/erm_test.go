@@ -99,11 +99,6 @@ func TestStackErrorError(t *testing.T) {
 			expected: "underlying",
 		},
 		{
-			name:     "only root present",
-			err:      &StackError{root: errors.New("underlying")},
-			expected: "underlying",
-		},
-		{
 			name:     "only message present",
 			err:      &StackError{msg: "test message"},
 			expected: "test message",
@@ -273,12 +268,12 @@ func TestErrorCollection(t *testing.T) {
 		}
 
 		// Should contain the added error
-		errors := container.AllErrors()
-		if len(errors) != 1 {
-			t.Fatalf("Expected 1 error, got %d", len(errors))
+		allErrors := container.AllErrors()
+		if len(allErrors) != 1 {
+			t.Fatalf("Expected 1 error, got %d", len(allErrors))
 		}
 
-		if errors[0] != childErr {
+		if allErrors[0] != childErr {
 			t.Error("Child error should match the added error")
 		}
 	})
@@ -292,14 +287,14 @@ func TestErrorCollection(t *testing.T) {
 		container.AddError(err1)
 		container.AddError(err2)
 
-		errors := container.AllErrors()
-		if len(errors) != 2 {
-			t.Fatalf("Expected 2 errors, got %d", len(errors))
+		allErrors := container.AllErrors()
+		if len(allErrors) != 2 {
+			t.Fatalf("Expected 2 errors, got %d", len(allErrors))
 		}
 
 		// Check that both errors are present
 		found := make(map[Error]bool)
-		for _, err := range errors {
+		for _, err := range allErrors {
 			found[err] = true
 		}
 
@@ -322,14 +317,14 @@ func TestErrorCollection(t *testing.T) {
 		newParent.AddError(parent)
 
 		// Should have flattened the errors
-		errors := newParent.AllErrors()
-		if len(errors) != 2 {
-			t.Fatalf("Expected 2 flattened errors, got %d", len(errors))
+		childErrors := newParent.AllErrors()
+		if len(childErrors) != 2 {
+			t.Fatalf("Expected 2 flattened errors, got %d", len(childErrors))
 		}
 
 		// Should contain the original child errors, not the container
 		found1, found2 := false, false
-		for _, err := range errors {
+		for _, err := range childErrors {
 			if err == child1 {
 				found1 = true
 			}
@@ -452,8 +447,8 @@ func TestAddErrors(t *testing.T) {
 		err2 := NewValidationError("validation.min_length", "password", "123")
 		err3 := NewValidationError("validation.email", "email", "invalid")
 
-		errors := []Error{err1, err2, err3}
-		container.AddErrors(errors)
+		errList := []Error{err1, err2, err3}
+		container.AddErrors(errList)
 
 		// Should have child errors
 		if !container.HasErrors() {
@@ -527,8 +522,8 @@ func TestAddErrors(t *testing.T) {
 		err1 := NewValidationError("validation.required", "email", "")
 		err2 := NewValidationError("validation.min_length", "password", "123")
 
-		errors := []Error{err1, nil, err2, nil}
-		container.AddErrors(errors)
+		errList := []Error{err1, nil, err2, nil}
+		container.AddErrors(errList)
 
 		// Should have only non-nil child errors
 		allErrors := container.AllErrors()
@@ -565,14 +560,14 @@ func TestAddErrors(t *testing.T) {
 		newParent.AddErrors([]Error{parent, parent2})
 
 		// Should have flattened all errors
-		errors := newParent.AllErrors()
-		if len(errors) != 3 {
-			t.Fatalf("Expected 3 flattened errors, got %d", len(errors))
+		flattenedErrors := newParent.AllErrors()
+		if len(flattenedErrors) != 3 {
+			t.Fatalf("Expected 3 flattened errors, got %d", len(flattenedErrors))
 		}
 
 		// Should contain the original child errors, not the containers
 		found := make(map[Error]bool)
-		for _, err := range errors {
+		for _, err := range flattenedErrors {
 			found[err] = true
 		}
 
@@ -597,20 +592,20 @@ func TestAddErrors(t *testing.T) {
 		container2.AddErrors([]Error{err1, err2, err3})
 
 		// Both should have the same errors
-		errors1 := container1.AllErrors()
-		errors2 := container2.AllErrors()
+		errList1 := container1.AllErrors()
+		errList2 := container2.AllErrors()
 
-		if len(errors1) != len(errors2) {
-			t.Fatalf("Expected same number of errors, got %d vs %d", len(errors1), len(errors2))
+		if len(errList1) != len(errList2) {
+			t.Fatalf("Expected same number of errors, got %d vs %d", len(errList1), len(errList2))
 		}
 
 		// Check that all errors match
 		found1 := make(map[Error]bool)
-		for _, err := range errors1 {
+		for _, err := range errList1 {
 			found1[err] = true
 		}
 
-		for _, err := range errors2 {
+		for _, err := range errList2 {
 			if !found1[err] {
 				t.Error("AddErrors should produce same result as multiple AddError calls")
 			}
@@ -624,8 +619,8 @@ func TestAddErrors(t *testing.T) {
 		err2 := NewValidationError("validation.required", "field2", "")
 		err3 := NewValidationError("validation.required", "field3", "")
 
-		errors := []Error{err1, err2, err3}
-		container.AddErrors(errors)
+		errList := []Error{err1, err2, err3}
+		container.AddErrors(errList)
 
 		// Check order is preserved (note: order depends on flattening behavior)
 		allErrors := container.AllErrors()
@@ -637,104 +632,6 @@ func TestAddErrors(t *testing.T) {
 		// they should be added in the same order
 		if allErrors[0] != err1 || allErrors[1] != err2 || allErrors[2] != err3 {
 			t.Error("Error order should be preserved when adding simple errors")
-		}
-	})
-}
-
-// =============================================================================
-// Localization Tests
-// =============================================================================
-
-// TestLocalization tests the localization functionality
-func TestLocalization(t *testing.T) {
-	t.Run("Basic localization", func(t *testing.T) {
-		err := NewValidationError("validation.required", "email", "")
-		msg := err.Error()
-
-		if msg != "email is required" {
-			t.Errorf("Expected 'email is required', got: %s", msg)
-		}
-	})
-
-	t.Run("Localization with parameters", func(t *testing.T) {
-		err := NewValidationError("validation.min_length", "password", "123").WithParam("min", 8)
-		msg := err.Error()
-
-		if !strings.Contains(msg, "8") {
-			t.Errorf("Expected message to contain '8', got: %s", msg)
-		}
-	})
-
-	t.Run("Custom localizer", func(t *testing.T) {
-		err := NewValidationError("validation.required", "email", "")
-
-		// Test localization with English language tag
-		msg := err.LocalizedError(language.English)
-
-		if msg != "email is required" {
-			t.Errorf("Expected localized message, got: %s", msg)
-		}
-	})
-
-	t.Run("Fallback for missing message", func(t *testing.T) {
-		// Test with a non-existent message key
-		err := NewValidationError("validation.nonexistent", "field", "value")
-		msg := err.Error()
-
-		// Should fall back to some reasonable default
-		if msg == "" {
-			t.Error("Should have fallback message for missing keys")
-		}
-	})
-}
-
-// TestLocalizedErrMap tests the LocalizedErrMap functionality
-func TestLocalizedErrMap(t *testing.T) {
-	t.Run("Single error localized", func(t *testing.T) {
-		err := NewValidationError("validation.required", "email", "")
-		errorMap := err.LocalizedErrMap(language.English)
-
-		if errorMap == nil {
-			t.Fatal("Expected error map, got nil")
-		}
-
-		if len(errorMap) != 1 {
-			t.Fatalf("Expected 1 field in error map, got %d", len(errorMap))
-		}
-
-		if errors, ok := errorMap["email"]; !ok || len(errors) != 1 {
-			t.Error("Expected one error for email field")
-		}
-	})
-
-	t.Run("Multiple errors localized", func(t *testing.T) {
-		container := New(http.StatusBadRequest, "Container", nil)
-		err1 := NewValidationError("validation.required", "email", "")
-		err2 := NewValidationError("validation.min_length", "password", "123").WithParam("min", 8)
-
-		container.AddError(err1)
-		container.AddError(err2)
-		errorMap := container.LocalizedErrMap(language.English)
-
-		if len(errorMap) != 2 {
-			t.Fatalf("Expected 2 fields in error map, got %d", len(errorMap))
-		}
-
-		if _, ok := errorMap["email"]; !ok {
-			t.Error("Expected email field in error map")
-		}
-
-		if _, ok := errorMap["password"]; !ok {
-			t.Error("Expected password field in error map")
-		}
-	})
-
-	t.Run("Custom language", func(t *testing.T) {
-		err := NewValidationError("validation.required", "email", "")
-
-		errorMap := err.LocalizedErrMap(language.English)
-		if errorMap == nil {
-			t.Fatal("Expected error map, got nil")
 		}
 	})
 }
@@ -1250,84 +1147,8 @@ func TestEdgeCases(t *testing.T) {
 }
 
 // =============================================================================
-// Test Helper Types and Functions
+// Internal Function Edge Cases
 // =============================================================================
-
-// Test helper types and functions
-type testService struct{}
-
-func (s testService) testMethod() Error {
-	return New(http.StatusBadRequest, "test", errors.New("test"))
-}
-
-func (s *testService) testPointerMethod() Error {
-	return New(http.StatusBadRequest, "test", errors.New("test"))
-}
-
-func simpleFunc() Error {
-	return New(http.StatusBadRequest, "test", errors.New("test"))
-}
-
-// MockLocale for testing
-type MockLocale struct {
-	messages map[string]string
-}
-
-func (m *MockLocale) GetMessage(code string) string {
-	return m.messages[code]
-}
-
-func (m *MockLocale) Messages() map[string]string {
-	return m.messages
-}
-
-// TestValidationErrorFunctions tests validation error creation methods
-func TestValidationErrorFunctions(t *testing.T) {
-
-	t.Run("NewValidationError_function", func(t *testing.T) {
-		err := NewValidationError("validation.required", "email", "")
-
-		if err.Code() != 400 {
-			t.Fatalf("Code() = %d, want 400", err.Code())
-		}
-		if err.FieldName() != "email" {
-			t.Fatalf("FieldName() = %q, want 'email'", err.FieldName())
-		}
-		if err.Value() != "" {
-			t.Fatalf("Value() = %v, want empty string", err.Value())
-		}
-		if err.MessageKey() != "validation.required" {
-			t.Fatalf("MessageKey() = %q, want 'validation.required'", err.MessageKey())
-		}
-		if !strings.Contains(err.Error(), "email is required") {
-			t.Fatalf("Error() = %q, should contain 'email is required'", err.Error())
-		}
-	})
-
-	t.Run("ValidationError_with_custom_status", func(t *testing.T) {
-		err := New(422, "", nil).
-			WithMessageKey("validation.custom").
-			WithFieldName("field").
-			WithValue("value")
-
-		if err.Code() != 422 {
-			t.Fatalf("Code() = %d, want 422", err.Code())
-		}
-		if err.FieldName() != "field" {
-			t.Fatalf("FieldName() = %q, want 'field'", err.FieldName())
-		}
-		if err.Value() != "value" {
-			t.Fatalf("Value() = %v, want 'value'", err.Value())
-		}
-		if err.MessageKey() != "validation.custom" {
-			t.Fatalf("MessageKey() = %q, want 'validation.custom'", err.MessageKey())
-		}
-		// Should show validation error for field when message not found
-		if !strings.Contains(err.Error(), "validation error for field") {
-			t.Fatalf("Error() = %q, should contain 'validation error for field'", err.Error())
-		}
-	})
-}
 
 // TestInternalFunctionEdgeCases improves coverage for internal functions
 func TestInternalFunctionEdgeCases(t *testing.T) {

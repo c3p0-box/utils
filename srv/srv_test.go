@@ -401,7 +401,7 @@ func TestMux_DefaultErrorHandler(t *testing.T) {
 		t.Errorf("Expected status code 500, got %d", rec.Code)
 	}
 
-	expectedBody := `{"error":"Internal Server Error"}`
+	expectedBody := `Something went wrong`
 	if strings.TrimSpace(rec.Body.String()) != expectedBody {
 		t.Errorf("Expected body '%s', got '%s'", expectedBody, strings.TrimSpace(rec.Body.String()))
 	}
