@@ -8,7 +8,7 @@ The `srv` package provides comprehensive HTTP server utilities for Go applicatio
 - **🔀 Enhanced Router**: Extended ServeMux with RESTful HTTP method helpers
 - **🔄 URL Reversing**: Named routes with automatic URL generation and parameter substitution
 - **🔗 Middleware System**: Composable HTTP middleware with easy chaining
-- **📊 Built-in Middleware**: Logging and panic recovery middleware included
+- **📊 Built-in Middleware**: Logging, panic recovery, and CORS middleware included
 - **🛑 Graceful Shutdown**: HTTP server with signal-based graceful shutdown
 - **📝 Structured Logging**: Integration with Go's structured logging (`log/slog`)
 - **🔗 ERM Integration**: Uses the erm package for standardized error handling and HTTP status codes
@@ -314,14 +314,31 @@ handler := srv.Recover(mux)  // Recovers from panics
 ```
 Prevents server crashes by catching and logging panics
 
+**CORS Middleware**
+```go
+// Default CORS configuration (allows all origins)
+handler := srv.CORS(srv.DefaultCORSConfig)(mux)
+
+// Custom CORS configuration
+corsConfig := srv.CORSConfig{
+    AllowOrigins:     []string{"https://example.com"},
+    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
+    AllowHeaders:     []string{"Content-Type", "Authorization"},
+    AllowCredentials: true,
+    MaxAge:           3600,
+}
+handler := srv.CORS(corsConfig)(mux)
+```
+Handles Cross-Origin Resource Sharing with configurable origins, methods, headers, and security options
+
 #### Middleware Chaining
 ```go
 // Chain multiple middleware (applied in reverse order)
 handler := srv.MiddlewareChain(
-    srv.Logging,    // Outermost: logs all requests
-    srv.Recover,    // Recovers from panics
-    CustomCORS,     // Custom CORS middleware
-    RateLimiting,   // Innermost: rate limiting
+    srv.Logging,                    // Outermost: logs all requests
+    srv.Recover,                    // Recovers from panics
+    srv.CORS(srv.DefaultCORSConfig), // Built-in CORS middleware
+    RateLimiting,                   // Innermost: rate limiting
 )(mux)
 ```
 
@@ -436,28 +453,22 @@ func Authentication(next http.Handler) http.Handler {
     })
 }
 
-func CORS(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        ctx := srv.NewHttpContext(w, r)
-        ctx.SetHeader("Access-Control-Allow-Origin", "*")
-        ctx.SetHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        ctx.SetHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        
-        if ctx.Method() == "OPTIONS" {
-            ctx.WriteHeader(204)
-            return
-        }
-        
-        next.ServeHTTP(w, r)
-    })
+// Custom CORS configuration example
+corsConfig := srv.CORSConfig{
+    AllowOrigins:     []string{"https://example.com", "https://app.example.com"},
+    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
+    AllowHeaders:     []string{"Content-Type", "Authorization"},
+    AllowCredentials: true,
+    MaxAge:           3600,
 }
+corsMiddleware := srv.CORS(corsConfig)
 
 // Chain all middleware
 mux := srv.NewMux()
 handler := srv.MiddlewareChain(
     srv.Logging,        // Log all requests
     srv.Recover,        // Panic recovery
-    CORS,               // CORS headers
+    corsMiddleware,     // CORS headers with custom config
     Authentication,     // JWT authentication
 )(mux)
 ```
@@ -632,12 +643,12 @@ go test -bench=. ./srv
 - ✅ **HttpContext**: Value store, request/response methods, thread safety
 - ✅ **Mux**: HTTP method helpers, routing, integration tests
 - ✅ **URL Reversing**: Named routes, parameter substitution, edge cases, integration
-- ✅ **Middleware**: Type safety, chaining, logging, recovery
+- ✅ **Middleware**: Type safety, chaining, logging, recovery, CORS
 - ✅ **RunServer**: Parameter validation, error handling, cleanup
 - ✅ **Integration**: Cross-component functionality tests
 - ✅ **Benchmarks**: Performance testing for all components
 
-**Current Coverage**: 90.5% of statements
+**Current Coverage**: 93.6% of statements
 
 ## Performance
 
@@ -656,11 +667,11 @@ Place middleware in logical order - logging first, authentication/authorization 
 
 ```go
 handler := srv.MiddlewareChain(
-    srv.Logging,        // First: log everything
-    srv.Recover,        // Second: catch panics
-    CORS,               // Third: CORS headers
-    Authentication,     // Fourth: auth before business logic
-    RateLimiting,       // Last: rate limiting
+    srv.Logging,                    // First: log everything
+    srv.Recover,                    // Second: catch panics
+    srv.CORS(srv.DefaultCORSConfig), // Third: CORS headers
+    Authentication,                 // Fourth: auth before business logic
+    RateLimiting,                   // Last: rate limiting
 )(mux)
 ```
 
@@ -683,7 +694,29 @@ if err := ctx.JSON(200, data); err != nil {
 }
 ```
 
-### 4. Resource Cleanup
+### 4. CORS Configuration
+Configure CORS appropriately for your security requirements:
+
+```go
+// Development - permissive CORS (or use DefaultCORSConfig)
+devCorsConfig := srv.CORSConfig{
+    AllowOrigins: []string{"*"},
+}
+corsMiddleware := srv.CORS(devCorsConfig)
+// Or simply: corsMiddleware := srv.CORS(srv.DefaultCORSConfig)
+
+// Production - restrictive CORS
+prodCorsConfig := srv.CORSConfig{
+    AllowOrigins:     []string{"https://yourdomain.com"},
+    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
+    AllowHeaders:     []string{"Content-Type", "Authorization"},
+    AllowCredentials: true,
+    MaxAge:           3600,
+}
+corsMiddleware := srv.CORS(prodCorsConfig)
+```
+
+### 5. Resource Cleanup
 Always provide cleanup functions for graceful shutdown:
 
 ```go
