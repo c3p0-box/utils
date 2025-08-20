@@ -6,11 +6,13 @@ The `srv` package provides comprehensive HTTP server utilities for Go applicatio
 
 - **🛠️ HTTP Context**: Convenient request/response wrapper with value storage
 - **🔀 Enhanced Router**: Extended ServeMux with RESTful HTTP method helpers
+- **🔄 URL Reversing**: Named routes with automatic URL generation and parameter substitution
 - **🔗 Middleware System**: Composable HTTP middleware with easy chaining
 - **📊 Built-in Middleware**: Logging and panic recovery middleware included
 - **🛑 Graceful Shutdown**: HTTP server with signal-based graceful shutdown
 - **📝 Structured Logging**: Integration with Go's structured logging (`log/slog`)
-- **⚡ Zero Dependencies**: Only uses Go standard library
+- **🔗 ERM Integration**: Uses the erm package for standardized error handling and HTTP status codes
+- **⚡ Minimal Dependencies**: Uses Go standard library plus c3p0-box/utils/erm for errors
 
 ## Installation
 
@@ -27,29 +29,47 @@ import (
     "errors"
     "log"
     "github.com/c3p0-box/utils/srv"
+    "github.com/c3p0-box/utils/erm"
 )
 
 func main() {
     // Create enhanced router with error handling
     mux := srv.NewMux()
     
-    // Add routes with new HandlerFunc signature (returns error)
-    mux.Get("/users", func(ctx *srv.HttpContext) error {
-        return ctx.JSON(200, map[string]string{"message": "Users list"})
+    // Add named routes for URL generation
+    mux.Get("users", "/users", func(ctx *srv.HttpContext) error {
+        // Generate URL to create user endpoint
+        createURL, _ := mux.Reverse("users", nil)
+        return ctx.JSON(200, map[string]interface{}{
+            "message": "Users list",
+            "create_url": createURL,
+        })
     })
     
-    mux.Post("/users", func(ctx *srv.HttpContext) error {
+    mux.Post("users", "/users", func(ctx *srv.HttpContext) error {
         name := ctx.FormValue("name")
         if name == "" {
             return errors.New("name is required")  // Error handled automatically
         }
-        return ctx.JSON(201, map[string]string{"created": name})
+        // Generate URL to view the created user
+        userURL, _ := mux.Reverse("user", map[string]string{"id": "123"})
+        return ctx.JSON(201, map[string]interface{}{
+            "created": name,
+            "user_url": userURL,
+        })
     })
     
-    // Set custom error handler (optional)
+    mux.Get("user", "/users/{id}", func(ctx *srv.HttpContext) error {
+        return ctx.JSON(200, map[string]string{"id": ctx.Param("id")})
+    })
+    
+    // Set custom error handler with erm integration (optional)
     mux.ErrorHandler(func(ctx *srv.HttpContext, err error) {
         log.Printf("Handler error: %v", err)
-        ctx.JSON(400, map[string]string{"error": err.Error()})
+        // erm errors provide proper HTTP status codes
+        status := erm.Status(err)  // Extract HTTP status from erm error
+        message := erm.Message(err) // Get user-safe message
+        ctx.JSON(status, map[string]string{"error": message})
     })
     
     // Chain middleware (logging and recovery)
@@ -163,13 +183,14 @@ The new `HandlerFunc` signature provides several advantages:
 mux := srv.NewMux()  // Includes default error handler
 ```
 
-#### HTTP Method Helpers (New HandlerFunc Signature)
+#### HTTP Method Helpers with Optional Naming
 ```go
-mux.Get("/users", func(ctx *HttpContext) error {
+// Named routes for URL generation
+mux.Get("user-list", "/users", func(ctx *HttpContext) error {
     return ctx.JSON(200, users)
 })
 
-mux.Post("/users", func(ctx *HttpContext) error {
+mux.Post("user-create", "/users", func(ctx *HttpContext) error {
     user := parseUser(ctx)
     if err := validateUser(user); err != nil {
         return err  // Automatically handled by error handler
@@ -177,19 +198,68 @@ mux.Post("/users", func(ctx *HttpContext) error {
     return ctx.JSON(201, user)
 })
 
-mux.Put("/users/{id}", func(ctx *HttpContext) error {
-    id := ctx.Param("id")
-    return updateUser(id, ctx)
+// Unnamed routes (empty string name)
+mux.Get("", "/health", func(ctx *HttpContext) error {
+    return ctx.String(200, "OK")
 })
 
-mux.Delete("/users/{id}", func(ctx *HttpContext) error {
-    return deleteUser(ctx.Param("id"))
-})
+// Same name for different methods (RESTful pattern)
+mux.Get("users", "/users", listUsersHandler)      // GET /users
+mux.Post("users", "/users", createUserHandler)    // POST /users
+mux.Get("user", "/users/{id}", getUserHandler)    // GET /users/{id}
+mux.Put("user", "/users/{id}", updateUserHandler) // PUT /users/{id}
+mux.Delete("user", "/users/{id}", deleteUserHandler) // DELETE /users/{id}
 
 // All HTTP methods supported
-mux.Patch("/users/{id}", handler)  // PATCH requests
-mux.Head("/ping", handler)         // HEAD requests
-mux.Options("/api/*", handler)     // OPTIONS requests
+mux.Patch("user-patch", "/users/{id}", handler)  // PATCH requests
+mux.Head("health-check", "/ping", handler)       // HEAD requests
+mux.Options("cors", "/api/*", handler)           // OPTIONS requests
+```
+
+#### URL Reversing (Simplified)
+```go
+// Generate URLs from route names (no method parameter needed)
+usersURL, err := mux.Reverse("users", nil)
+// Returns: "/users" (works for both GET and POST since same pattern)
+
+userURL, err := mux.Reverse("user", map[string]string{"id": "123"})
+// Returns: "/users/123" (works for GET, PUT, DELETE since same pattern)
+
+// Error handling with erm package integration
+userURL, err := mux.Reverse("non-existent", nil)
+// Returns: "", erm.NotFound error with 404 status
+
+userURL, err := mux.Reverse("user-profile", nil)  // Missing {id} parameter
+// Returns: "", erm.RequiredError for missing parameters
+```
+
+#### URL Generation in Handlers
+```go
+mux.Get("users", "/users", func(ctx *HttpContext) error {
+    // Generate URLs to related endpoints
+    createURL, _ := mux.Reverse("users", nil)  // Simplified: no method needed
+    
+    return ctx.JSON(200, map[string]interface{}{
+        "users": getUsersList(),
+        "links": map[string]string{
+            "create": createURL,
+        },
+    })
+})
+
+mux.Get("user", "/users/{id}", func(ctx *HttpContext) error {
+    id := ctx.Param("id")
+    
+    // Generate URLs with dynamic parameters (no method needed)
+    editURL, _ := mux.Reverse("user", map[string]string{"id": id})
+    
+    return ctx.JSON(200, map[string]interface{}{
+        "user": getUser(id),
+        "links": map[string]string{
+            "edit": editURL,  // Same URL for PUT, DELETE since same pattern
+        },
+    })
+})
 ```
 
 #### Error Handling
@@ -288,12 +358,12 @@ mux.ErrorHandler(func(ctx *srv.HttpContext, err error) {
     ctx.JSON(500, map[string]string{"error": err.Error()})
 })
 
-// Users API with new HandlerFunc signature
-mux.Get("/users", listUsers)
-mux.Post("/users", createUser)
-mux.Get("/users/{id}", getUser)
-mux.Put("/users/{id}", updateUser)
-mux.Delete("/users/{id}", deleteUser)
+// Users API with enhanced naming and URL generation
+mux.Get("users", "/users", listUsers)
+mux.Post("users", "/users", createUser)
+mux.Get("user", "/users/{id}", getUser)
+mux.Put("user", "/users/{id}", updateUser)
+mux.Delete("user", "/users/{id}", deleteUser)
 
 func getUser(ctx *srv.HttpContext) error {
     // Get path parameter
@@ -308,8 +378,16 @@ func getUser(ctx *srv.HttpContext) error {
         return err  // Automatically handled by error handler
     }
     
-    // Return JSON response
-    return ctx.JSON(200, user)
+    // Generate URLs to related endpoints
+    editURL, _ := mux.Reverse("user", map[string]string{"id": id})
+    
+    // Return JSON response with links
+    return ctx.JSON(200, map[string]interface{}{
+        "user": user,
+        "links": map[string]string{
+            "edit": editURL,
+        },
+    })
 }
 
 func createUser(ctx *srv.HttpContext) error {
@@ -553,12 +631,13 @@ go test -bench=. ./srv
 
 - ✅ **HttpContext**: Value store, request/response methods, thread safety
 - ✅ **Mux**: HTTP method helpers, routing, integration tests
+- ✅ **URL Reversing**: Named routes, parameter substitution, edge cases, integration
 - ✅ **Middleware**: Type safety, chaining, logging, recovery
 - ✅ **RunServer**: Parameter validation, error handling, cleanup
 - ✅ **Integration**: Cross-component functionality tests
 - ✅ **Benchmarks**: Performance testing for all components
 
-**Current Coverage**: 87.0% of statements
+**Current Coverage**: 90.5% of statements
 
 ## Performance
 

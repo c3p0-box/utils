@@ -1,6 +1,7 @@
 package srv
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -9,45 +10,6 @@ import (
 	"strings"
 	"testing"
 )
-
-func TestRunServer_ParameterDefaults(t *testing.T) {
-	// Test parameter default logic without actually calling RunServer
-	// (which would hang waiting for signals)
-
-	// Test default host logic
-	host := ""
-	if host == "" {
-		host = "0.0.0.0"
-	}
-	if host != "0.0.0.0" {
-		t.Errorf("Expected default host to be '0.0.0.0', got '%s'", host)
-	}
-
-	// Test default port logic
-	port := ""
-	if port == "" {
-		port = "8000"
-	}
-	if port != "8000" {
-		t.Errorf("Expected default port to be '8000', got '%s'", port)
-	}
-
-	// Test custom values are preserved
-	customHost := "localhost"
-	customPort := "9999"
-	if customHost == "" {
-		customHost = "0.0.0.0"
-	}
-	if customPort == "" {
-		customPort = "8000"
-	}
-	if customHost != "localhost" {
-		t.Errorf("Expected custom host to be preserved as 'localhost', got '%s'", customHost)
-	}
-	if customPort != "9999" {
-		t.Errorf("Expected custom port to be preserved as '9999', got '%s'", customPort)
-	}
-}
 
 // Test cleanup function behavior
 func TestRunServer_CleanupFunction(t *testing.T) {
@@ -79,8 +41,7 @@ func TestRunServer_CleanupFunctionError(t *testing.T) {
 	err := cleanup()
 	if err == nil {
 		t.Error("Expected cleanup to return an error")
-	}
-	if err.Error() != "cleanup failed" {
+	} else if err.Error() != "cleanup failed" {
 		t.Errorf("Expected error message 'cleanup failed', got '%s'", err.Error())
 	}
 }
@@ -92,7 +53,7 @@ func TestRunServer_ServerStartupError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start test listener: %v", err)
 	}
-	defer listener.Close()
+	defer func(listener net.Listener) { _ = listener.Close() }(listener)
 
 	// Get the port that's now in use
 	addr := listener.Addr().(*net.TCPAddr)
@@ -237,7 +198,7 @@ func TestMux_HTTPMethods(t *testing.T) {
 	methods := []struct {
 		name    string
 		method  string
-		setup   func(string, HandlerFunc)
+		setup   func(string, string, HandlerFunc)
 		pattern string
 	}{
 		{"GET", "GET", mux.Get, "/get"},
@@ -252,7 +213,7 @@ func TestMux_HTTPMethods(t *testing.T) {
 	for _, test := range methods {
 		t.Run(test.name, func(t *testing.T) {
 			called := false
-			test.setup(test.pattern, func(ctx *HttpContext) error {
+			test.setup("", test.pattern, func(ctx *HttpContext) error {
 				called = true
 				ctx.WriteHeader(200)
 				return nil
@@ -292,15 +253,15 @@ func TestMux_Integration(t *testing.T) {
 	mux := NewMux()
 
 	// Set up various routes
-	mux.Get("/users", func(ctx *HttpContext) error {
+	mux.Get("", "/users", func(ctx *HttpContext) error {
 		return ctx.String(200, "GET users")
 	})
 
-	mux.Post("/users", func(ctx *HttpContext) error {
+	mux.Post("", "/users", func(ctx *HttpContext) error {
 		return ctx.String(201, "POST users")
 	})
 
-	mux.Get("/users/{id}", func(ctx *HttpContext) error {
+	mux.Get("", "/users/{id}", func(ctx *HttpContext) error {
 		id := ctx.Param("id")
 		return ctx.String(200, "GET user "+id)
 	})
@@ -348,11 +309,11 @@ func TestMux_ErrorHandler(t *testing.T) {
 	mux.ErrorHandler(func(ctx *HttpContext, err error) {
 		capturedError = err
 		capturedContext = ctx
-		ctx.JSON(400, map[string]string{"error": "Custom error: " + err.Error()})
+		_ = ctx.JSON(400, map[string]string{"error": "Custom error: " + err.Error()})
 	})
 
 	// Register a handler that returns an error
-	mux.Get("/error", func(ctx *HttpContext) error {
+	mux.Get("", "/error", func(ctx *HttpContext) error {
 		return errors.New("test error")
 	})
 
@@ -387,7 +348,7 @@ func TestMux_DefaultErrorHandler(t *testing.T) {
 	mux := NewMux()
 
 	// Register a handler that returns an error (should use default error handler)
-	mux.Post("/error", func(ctx *HttpContext) error {
+	mux.Post("", "/error", func(ctx *HttpContext) error {
 		return errors.New("internal error")
 	})
 
@@ -411,7 +372,7 @@ func TestMux_NoErrorHandling(t *testing.T) {
 	mux := NewMux()
 
 	// Register a handler that returns no error
-	mux.Put("/success", func(ctx *HttpContext) error {
+	mux.Put("", "/success", func(ctx *HttpContext) error {
 		return ctx.JSON(200, map[string]string{"status": "success"})
 	})
 
@@ -437,11 +398,11 @@ func TestMux_ErrorFromResponseMethod(t *testing.T) {
 	var capturedError error
 	mux.ErrorHandler(func(ctx *HttpContext, err error) {
 		capturedError = err
-		ctx.String(500, "Response error occurred")
+		_ = ctx.String(500, "Response error occurred")
 	})
 
 	// Register a handler that has an error in the response method
-	mux.Delete("/response-error", func(ctx *HttpContext) error {
+	mux.Delete("", "/response-error", func(ctx *HttpContext) error {
 		// This should work fine and not trigger error handler
 		return ctx.JSON(200, map[string]string{"message": "success"})
 	})
@@ -460,4 +421,479 @@ func TestMux_ErrorFromResponseMethod(t *testing.T) {
 	if rec.Code != 200 {
 		t.Errorf("Expected status code 200, got %d", rec.Code)
 	}
+}
+
+// ============================
+// URL Reversing Tests
+// ============================
+
+func TestMux_NamedRoutes_BasicFunctionality(t *testing.T) {
+	mux := NewMux()
+
+	// Register named routes
+	mux.Get("user-list", "/users", func(ctx *HttpContext) error {
+		return ctx.String(200, "users list")
+	})
+
+	mux.Post("user-create", "/users", func(ctx *HttpContext) error {
+		return ctx.String(201, "user created")
+	})
+
+	mux.Get("user-profile", "/users/{id}", func(ctx *HttpContext) error {
+		id := ctx.Param("id")
+		return ctx.String(200, "user "+id)
+	})
+
+	// Test that named routes work as regular routes
+	tests := []struct {
+		method         string
+		path           string
+		expectedStatus int
+		expectedBody   string
+	}{
+		{"GET", "/users", 200, "users list"},
+		{"POST", "/users", 201, "user created"},
+		{"GET", "/users/123", 200, "user 123"},
+	}
+
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("%s %s", test.method, test.path), func(t *testing.T) {
+			req := httptest.NewRequest(test.method, test.path, nil)
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != test.expectedStatus {
+				t.Errorf("Expected status %d, got %d", test.expectedStatus, rec.Code)
+			}
+
+			if rec.Body.String() != test.expectedBody {
+				t.Errorf("Expected body '%s', got '%s'", test.expectedBody, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestMux_NamedRoutes_AllMethods(t *testing.T) {
+	mux := NewMux()
+
+	methods := []struct {
+		name      string
+		method    string
+		setup     func(string, string, HandlerFunc)
+		routeName string
+		pattern   string
+	}{
+		{"Get", "GET", mux.Get, "get-route", "/get"},
+		{"Post", "POST", mux.Post, "post-route", "/post"},
+		{"Put", "PUT", mux.Put, "put-route", "/put"},
+		{"Delete", "DELETE", mux.Delete, "delete-route", "/delete"},
+		{"Patch", "PATCH", mux.Patch, "patch-route", "/patch"},
+		{"Head", "HEAD", mux.Head, "head-route", "/head"},
+		{"Options", "OPTIONS", mux.Options, "options-route", "/options"},
+	}
+
+	for _, test := range methods {
+		t.Run(test.name, func(t *testing.T) {
+			called := false
+			test.setup(test.routeName, test.pattern, func(ctx *HttpContext) error {
+				called = true
+				ctx.WriteHeader(200)
+				return nil
+			})
+
+			// Test that the named route works
+			req := httptest.NewRequest(test.method, test.pattern, nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if !called {
+				t.Errorf("Expected %s handler to be called", test.method)
+			}
+			if rec.Code != 200 {
+				t.Errorf("Expected status code 200, got %d", rec.Code)
+			}
+
+			// Test that the route is stored for reversing
+			url, err := mux.Reverse(test.routeName, nil)
+			if err != nil {
+				t.Errorf("Expected no error for URL reversing, got: %v", err)
+			}
+			if url != test.pattern {
+				t.Errorf("Expected URL '%s', got '%s'", test.pattern, url)
+			}
+		})
+	}
+}
+
+func TestMux_Reverse_BasicURLGeneration(t *testing.T) {
+	mux := NewMux()
+
+	// Register routes
+	mux.Get("user-list", "/users", func(ctx *HttpContext) error {
+		return ctx.String(200, "OK")
+	})
+
+	mux.Post("user-create", "/users", func(ctx *HttpContext) error {
+		return ctx.String(200, "OK")
+	})
+
+	mux.Get("user-profile", "/users/{id}", func(ctx *HttpContext) error {
+		return ctx.String(200, "OK")
+	})
+
+	tests := []struct {
+		name        string
+		routeName   string
+		method      string
+		params      map[string]string
+		expectedURL string
+		expectError bool
+	}{
+		{
+			name:        "simple route without parameters",
+			routeName:   "user-list",
+			params:      nil,
+			expectedURL: "/users",
+			expectError: false,
+		},
+		{
+			name:        "same pattern different method",
+			routeName:   "user-create",
+			params:      nil,
+			expectedURL: "/users",
+			expectError: false,
+		},
+		{
+			name:        "route with parameters",
+			routeName:   "user-profile",
+			params:      map[string]string{"id": "123"},
+			expectedURL: "/users/123",
+			expectError: false,
+		},
+		{
+			name:        "route not found",
+			routeName:   "non-existent",
+			params:      nil,
+			expectedURL: "",
+			expectError: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			url, err := mux.Reverse(test.routeName, test.params)
+
+			if test.expectError {
+				if err == nil {
+					t.Error("Expected an error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error but got: %v", err)
+				}
+				if url != test.expectedURL {
+					t.Errorf("Expected URL '%s', got '%s'", test.expectedURL, url)
+				}
+			}
+		})
+	}
+}
+
+func TestMux_Reverse_ParameterSubstitution(t *testing.T) {
+	mux := NewMux()
+
+	// Register routes with various parameter patterns
+	mux.Get("user-profile", "/users/{id}", func(ctx *HttpContext) error {
+		return ctx.String(200, "OK")
+	})
+
+	mux.Get("user-posts", "/users/{userId}/posts/{postId}", func(ctx *HttpContext) error {
+		return ctx.String(200, "OK")
+	})
+
+	mux.Get("complex-route", "/api/v1/{version}/users/{id}/settings/{setting}", func(ctx *HttpContext) error {
+		return ctx.String(200, "OK")
+	})
+
+	tests := []struct {
+		name        string
+		routeName   string
+		params      map[string]string
+		expectedURL string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "single parameter substitution",
+			routeName:   "user-profile",
+			params:      map[string]string{"id": "456"},
+			expectedURL: "/users/456",
+			expectError: false,
+		},
+		{
+			name:        "multiple parameter substitution",
+			routeName:   "user-posts",
+			params:      map[string]string{"userId": "123", "postId": "789"},
+			expectedURL: "/users/123/posts/789",
+			expectError: false,
+		},
+		{
+			name:        "complex parameter substitution",
+			routeName:   "complex-route",
+			params:      map[string]string{"version": "2", "id": "user123", "setting": "privacy"},
+			expectedURL: "/api/v1/2/users/user123/settings/privacy",
+			expectError: false,
+		},
+		{
+			name:        "missing required parameter",
+			routeName:   "user-profile",
+			params:      nil,
+			expectedURL: "",
+			expectError: true,
+			errorMsg:    "is required",
+		},
+		{
+			name:        "partially missing parameters",
+			routeName:   "user-posts",
+			params:      map[string]string{"userId": "123"},
+			expectedURL: "",
+			expectError: true,
+			errorMsg:    "is required",
+		},
+		{
+			name:        "invalid parameter name",
+			routeName:   "user-profile",
+			params:      map[string]string{"wrong": "123"},
+			expectedURL: "",
+			expectError: true,
+			errorMsg:    "is required",
+		},
+		{
+			name:        "extra parameters (should work)",
+			routeName:   "user-profile",
+			params:      map[string]string{"id": "123", "extra": "ignored"},
+			expectedURL: "/users/123",
+			expectError: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			url, err := mux.Reverse(test.routeName, test.params)
+
+			if test.expectError {
+				if err == nil {
+					t.Error("Expected an error but got none")
+				} else if test.errorMsg != "" && !strings.Contains(err.Error(), test.errorMsg) {
+					t.Errorf("Expected error to contain '%s', got: %v", test.errorMsg, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error but got: %v", err)
+				}
+				if url != test.expectedURL {
+					t.Errorf("Expected URL '%s', got '%s'", test.expectedURL, url)
+				}
+			}
+		})
+	}
+}
+
+func TestMux_Reverse_SameNameDifferentMethods(t *testing.T) {
+	mux := NewMux()
+
+	// Register the same route name for different methods
+	// This is a common RESTful pattern
+	mux.Get("users", "/users", func(ctx *HttpContext) error {
+		return ctx.String(200, "GET users")
+	})
+
+	mux.Post("users", "/users", func(ctx *HttpContext) error {
+		return ctx.String(201, "POST users")
+	})
+
+	mux.Put("user", "/users/{id}", func(ctx *HttpContext) error {
+		return ctx.String(200, "PUT user")
+	})
+
+	mux.Delete("user", "/users/{id}", func(ctx *HttpContext) error {
+		return ctx.String(204, "DELETE user")
+	})
+
+	tests := []struct {
+		name        string
+		routeName   string
+		method      string
+		params      map[string]string
+		expectedURL string
+		expectError bool
+	}{
+		{
+			name:        "GET users route",
+			routeName:   "users",
+			method:      "GET",
+			params:      nil,
+			expectedURL: "/users",
+			expectError: false,
+		},
+		{
+			name:        "POST users route",
+			routeName:   "users",
+			method:      "POST",
+			params:      nil,
+			expectedURL: "/users",
+			expectError: false,
+		},
+		{
+			name:        "PUT user route",
+			routeName:   "user",
+			method:      "PUT",
+			params:      map[string]string{"id": "123"},
+			expectedURL: "/users/123",
+			expectError: false,
+		},
+		{
+			name:        "DELETE user route",
+			routeName:   "user",
+			method:      "DELETE",
+			params:      map[string]string{"id": "456"},
+			expectedURL: "/users/456",
+			expectError: false,
+		},
+		{
+			name:        "same name works for different methods",
+			routeName:   "users",
+			params:      nil,
+			expectedURL: "/users",
+			expectError: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			url, err := mux.Reverse(test.routeName, test.params)
+
+			if test.expectError {
+				if err == nil {
+					t.Error("Expected an error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error but got: %v", err)
+				}
+				if url != test.expectedURL {
+					t.Errorf("Expected URL '%s', got '%s'", test.expectedURL, url)
+				}
+			}
+		})
+	}
+}
+
+func TestMux_Reverse_Integration(t *testing.T) {
+	mux := NewMux()
+
+	// Set up a realistic RESTful API with named routes
+	mux.Get("users", "/users", func(ctx *HttpContext) error {
+		// Generate URLs to other routes within handler
+		userProfileURL, _ := mux.Reverse("user", map[string]string{"id": "123"})
+		createUserURL, _ := mux.Reverse("users", nil)
+
+		return ctx.JSON(200, map[string]interface{}{
+			"users":            []string{"user1", "user2"},
+			"user_profile_url": userProfileURL,
+			"create_user_url":  createUserURL,
+		})
+	})
+
+	mux.Post("users", "/users", func(ctx *HttpContext) error {
+		return ctx.String(201, "User created")
+	})
+
+	mux.Get("user", "/users/{id}", func(ctx *HttpContext) error {
+		id := ctx.Param("id")
+		editURL, _ := mux.Reverse("user", map[string]string{"id": id})
+		deleteURL, _ := mux.Reverse("user", map[string]string{"id": id})
+
+		return ctx.JSON(200, map[string]interface{}{
+			"id":         id,
+			"edit_url":   editURL,
+			"delete_url": deleteURL,
+		})
+	})
+
+	mux.Put("user", "/users/{id}", func(ctx *HttpContext) error {
+		return ctx.String(200, "User updated")
+	})
+
+	mux.Delete("user", "/users/{id}", func(ctx *HttpContext) error {
+		return ctx.String(204, "User deleted")
+	})
+
+	// Test the integration
+	t.Run("GET users with URL generation", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/users", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != 200 {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+
+		// Parse JSON response
+		var response map[string]interface{}
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to decode JSON response: %v", err)
+		}
+
+		// Verify generated URLs
+		if profileURL, ok := response["user_profile_url"].(string); ok {
+			if profileURL != "/users/123" {
+				t.Errorf("Expected user profile URL '/users/123', got '%s'", profileURL)
+			}
+		} else {
+			t.Error("Expected user_profile_url in response")
+		}
+
+		if createURL, ok := response["create_user_url"].(string); ok {
+			if createURL != "/users" {
+				t.Errorf("Expected create user URL '/users', got '%s'", createURL)
+			}
+		} else {
+			t.Error("Expected create_user_url in response")
+		}
+	})
+
+	t.Run("GET user with URL generation", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/users/456", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != 200 {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+
+		// Parse JSON response
+		var response map[string]interface{}
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to decode JSON response: %v", err)
+		}
+
+		// Verify generated URLs
+		if editURL, ok := response["edit_url"].(string); ok {
+			if editURL != "/users/456" {
+				t.Errorf("Expected edit URL '/users/456', got '%s'", editURL)
+			}
+		} else {
+			t.Error("Expected edit_url in response")
+		}
+
+		if deleteURL, ok := response["delete_url"].(string); ok {
+			if deleteURL != "/users/456" {
+				t.Errorf("Expected delete URL '/users/456', got '%s'", deleteURL)
+			}
+		} else {
+			t.Error("Expected delete_url in response")
+		}
+	})
 }

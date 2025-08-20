@@ -1,22 +1,32 @@
-// Package srv provides HTTP server utilities with middleware support and graceful shutdown.
+// Package srv provides HTTP server utilities with middleware support, graceful shutdown,
+// enhanced routing with URL reversing, and standardized error handling via the erm package.
 //
-// This package offers a collection of HTTP middleware components and a server runner
-// that supports graceful shutdown with signal handling. It includes logging and recovery
-// middleware, along with utilities for chaining multiple middleware together.
+// This package offers a collection of HTTP middleware components, a server runner
+// that supports graceful shutdown with signal handling, and an enhanced router with
+// URL reversing capabilities. It includes logging and recovery middleware, along with
+// utilities for chaining multiple middleware together. All errors use the erm package
+// for consistent HTTP status codes and internationalized error messages.
 //
 // Example usage:
 //
-//	mux := http.NewServeMux()
-//	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-//		w.WriteHeader(http.StatusOK)
-//		w.Write([]byte("OK"))
+//	mux := srv.NewMux()
+//	mux.Get("users", "/users", func(ctx *srv.HttpContext) error {
+//		return ctx.JSON(200, users)
+//	})
+//	mux.Get("user", "/users/{id}", func(ctx *srv.HttpContext) error {
+//		id := ctx.Param("id")
+//		editURL, _ := mux.Reverse("user", map[string]string{"id": id})
+//		return ctx.JSON(200, map[string]interface{}{
+//			"user": getUser(id),
+//			"edit_url": editURL,
+//		})
 //	})
 //
 //	// Chain middleware
-//	handler := MiddlewareChain(Logging, Recover)(mux)
+//	handler := srv.MiddlewareChain(srv.Logging, srv.Recover)(mux)
 //
 //	// Run server with graceful shutdown
-//	err := RunServer(handler, "localhost", "8080", func() error {
+//	err := srv.RunServer(handler, "localhost", "8080", func() error {
 //		// cleanup logic here
 //		return nil
 //	})
@@ -28,8 +38,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/c3p0-box/utils/erm"
 )
 
 // RunServer starts an HTTP server with graceful shutdown capabilities.
@@ -113,6 +127,14 @@ func RunServer(handler http.Handler, host string, port string, cleanup func() er
 // Mux - HTTP Router Wrapper
 // ============================
 
+// Route represents a named route with its URL pattern.
+// Multiple HTTP methods can share the same route if they have the same pattern.
+// This is used internally for URL reversing functionality.
+type Route struct {
+	Name    string // The route name for URL reversing
+	Pattern string // URL pattern (e.g., "/users/{id}")
+}
+
 // HandlerFunc defines a handler function that receives an HttpContext and returns an error.
 // This allows for more elegant error handling compared to traditional http.HandlerFunc.
 // If the handler returns an error, it will be passed to the configured error handler.
@@ -130,7 +152,7 @@ func RunServer(handler http.Handler, host string, port string, cleanup func() er
 type HandlerFunc func(ctx *HttpContext) error
 
 // Mux provides a convenient wrapper around Go's standard http.ServeMux
-// with helper methods for common HTTP operations, RESTful routing, and centralized error handling.
+// with helper methods for common HTTP operations, RESTful routing, URL reversing, and centralized error handling.
 //
 // The Mux supports two types of handlers:
 //   - Traditional http.Handler and http.HandlerFunc via Handle() and HandleFunc()
@@ -138,16 +160,21 @@ type HandlerFunc func(ctx *HttpContext) error
 type Mux struct {
 	mux        *http.ServeMux
 	errHandler func(ctx *HttpContext, err error)
+	routes     map[string]Route // Named routes for URL reversing, key format: "name"
+	routesMu   sync.RWMutex     // Protects routes map from concurrent access
 }
 
 // NewMux creates a new Mux instance with an underlying http.ServeMux and a default error handler.
 // The default error handler responds with a 500 Internal Server Error and logs the error.
+// The returned Mux is safe for concurrent use by multiple goroutines.
 func NewMux() *Mux {
 	return &Mux{
 		mux: http.NewServeMux(),
 		errHandler: func(ctx *HttpContext, err error) {
 			_ = ctx.String(http.StatusInternalServerError, "Something went wrong")
 		},
+		routes:   make(map[string]Route),
+		routesMu: sync.RWMutex{},
 	}
 }
 
@@ -187,11 +214,23 @@ func (m *Mux) ErrorHandler(handler func(c *HttpContext, err error)) {
 	m.errHandler = handler
 }
 
-// execHandler is an internal method that wraps HandlerFunc with error handling.
+// execHandler is an internal method that wraps HandlerFunc with error handling
+// and registers named routes for URL reversing when a name is provided.
 // It creates an HttpContext and passes it to the handler. If the handler returns
 // an error, it calls the configured error handler with the same context.
-func (m *Mux) execHandler(pattern string, handler HandlerFunc) {
-	m.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+// This method is safe for concurrent use.
+func (m *Mux) execHandler(name, method, pattern string, handler HandlerFunc) {
+	// Register named route if name is provided
+	if name != "" {
+		// Protect routes map access with write lock
+		m.routesMu.Lock()
+		m.routes[name] = Route{Name: name, Pattern: pattern}
+		m.routesMu.Unlock()
+	}
+
+	// Register the handler with the HTTP mux
+	fullPattern := method + " " + pattern
+	m.mux.HandleFunc(fullPattern, func(w http.ResponseWriter, r *http.Request) {
 		ctx := NewHttpContext(w, r)
 		if err := handler(ctx); err != nil {
 			m.errHandler(ctx, err)
@@ -203,37 +242,123 @@ func (m *Mux) execHandler(pattern string, handler HandlerFunc) {
 // HTTP Method Helpers
 // ============================
 
-// Get registers a handler for GET requests to the specified pattern.
-func (m *Mux) Get(pattern string, handler HandlerFunc) {
-	m.execHandler("GET "+pattern, handler)
+// Get registers a named handler for GET requests to the specified pattern.
+// If name is provided, the route can be used for URL generation via the Reverse method.
+// If name is empty string, the route is registered without naming.
+//
+// Example:
+//
+//	m.Get("user-list", "/users", handler)                    // Named route
+//	m.Get("", "/health", handler)                            // Unnamed route
+//	url, err := m.Reverse("user-list", nil)                  // Generate: "/users"
+func (m *Mux) Get(name, pattern string, handler HandlerFunc) {
+	m.execHandler(name, "GET", pattern, handler)
 }
 
-// Post registers a handler for POST requests to the specified pattern.
-func (m *Mux) Post(pattern string, handler HandlerFunc) {
-	m.execHandler("POST "+pattern, handler)
+// Post registers a named handler for POST requests to the specified pattern.
+// If name is provided, the route can be used for URL generation via the Reverse method.
+// If name is empty string, the route is registered without naming.
+func (m *Mux) Post(name, pattern string, handler HandlerFunc) {
+	m.execHandler(name, "POST", pattern, handler)
 }
 
-// Put registers a handler for PUT requests to the specified pattern.
-func (m *Mux) Put(pattern string, handler HandlerFunc) {
-	m.execHandler("PUT "+pattern, handler)
+// Put registers a named handler for PUT requests to the specified pattern.
+// If name is provided, the route can be used for URL generation via the Reverse method.
+// If name is empty string, the route is registered without naming.
+func (m *Mux) Put(name, pattern string, handler HandlerFunc) {
+	m.execHandler(name, "PUT", pattern, handler)
 }
 
-// Delete registers a handler for DELETE requests to the specified pattern.
-func (m *Mux) Delete(pattern string, handler HandlerFunc) {
-	m.execHandler("DELETE "+pattern, handler)
+// Delete registers a named handler for DELETE requests to the specified pattern.
+// If name is provided, the route can be used for URL generation via the Reverse method.
+// If name is empty string, the route is registered without naming.
+func (m *Mux) Delete(name, pattern string, handler HandlerFunc) {
+	m.execHandler(name, "DELETE", pattern, handler)
 }
 
-// Patch registers a handler for PATCH requests to the specified pattern.
-func (m *Mux) Patch(pattern string, handler HandlerFunc) {
-	m.execHandler("PATCH "+pattern, handler)
+// Patch registers a named handler for PATCH requests to the specified pattern.
+// If name is provided, the route can be used for URL generation via the Reverse method.
+// If name is empty string, the route is registered without naming.
+func (m *Mux) Patch(name, pattern string, handler HandlerFunc) {
+	m.execHandler(name, "PATCH", pattern, handler)
 }
 
-// Head registers a handler for HEAD requests to the specified pattern.
-func (m *Mux) Head(pattern string, handler HandlerFunc) {
-	m.execHandler("HEAD "+pattern, handler)
+// Head registers a named handler for HEAD requests to the specified pattern.
+// If name is provided, the route can be used for URL generation via the Reverse method.
+// If name is empty string, the route is registered without naming.
+func (m *Mux) Head(name, pattern string, handler HandlerFunc) {
+	m.execHandler(name, "HEAD", pattern, handler)
 }
 
-// Options registers a handler for OPTIONS requests to the specified pattern.
-func (m *Mux) Options(pattern string, handler HandlerFunc) {
-	m.execHandler("OPTIONS "+pattern, handler)
+// Options registers a named handler for OPTIONS requests to the specified pattern.
+// If name is provided, the route can be used for URL generation via the Reverse method.
+// If name is empty string, the route is registered without naming.
+func (m *Mux) Options(name, pattern string, handler HandlerFunc) {
+	m.execHandler(name, "OPTIONS", pattern, handler)
+}
+
+// ============================
+// URL Reversing
+// ============================
+
+// Reverse generates a URL for the named route with the provided parameters.
+// Parameters should be provided as a map where keys match the path parameter names in the
+// route pattern (e.g., "id" for "/users/{id}").
+//
+// Multiple HTTP methods can share the same route name if they have the same pattern,
+// enabling RESTful route naming (e.g., "users" for both GET /users and POST /users).
+//
+// Parameters:
+//   - name: The route name specified when registering the route
+//   - params: Map of parameter names to values for substitution
+//
+// Returns the generated URL path and any error encountered. Errors are returned as
+// erm.Error instances: erm.NotFound for unknown routes and erm.RequiredError for
+// missing required parameters.
+//
+// Example:
+//
+//	m.Get("user-profile", "/users/{id}", handler)
+//	m.Post("users", "/users", handler)
+//
+//	// Generate URLs
+//	profileURL, err := m.Reverse("user-profile", map[string]string{"id": "123"})
+//	// Returns: "/users/123"
+//
+//	usersURL, err := m.Reverse("users", nil)
+//	// Returns: "/users"
+//
+//	// Error handling
+//	_, err := m.Reverse("non-existent", nil)
+//	// Returns: erm.NotFound error with 404 status
+//
+//	_, err := m.Reverse("user-profile", nil)
+//	// Returns: erm.RequiredError for missing {id} parameter
+func (m *Mux) Reverse(name string, params map[string]string) (string, error) {
+	// Protect routes map access with read lock
+	m.routesMu.RLock()
+	route, exists := m.routes[name]
+	m.routesMu.RUnlock()
+
+	if !exists {
+		return "", erm.NotFound(name, nil)
+	}
+
+	url := route.Pattern
+
+	// Replace path parameters if provided
+	for paramName, paramValue := range params {
+		placeholder := "{" + paramName + "}"
+		if strings.Contains(url, placeholder) {
+			url = strings.ReplaceAll(url, placeholder, paramValue)
+		}
+		// Ignore parameters that don't exist in the pattern
+	}
+
+	// Check if there are any unreplaced parameters
+	if strings.Contains(url, "{") && strings.Contains(url, "}") {
+		return "", erm.RequiredError(name, route.Pattern)
+	}
+
+	return url, nil
 }
