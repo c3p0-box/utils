@@ -321,3 +321,98 @@ func CORS(config CORSConfig) Middleware {
 		})
 	}
 }
+
+// =============================================================================
+// Trailing Slash Middleware
+// =============================================================================
+
+// TrailingSlashConfig defines the configuration for AddTrailingSlash middleware.
+type TrailingSlashConfig struct {
+	// RedirectCode is the HTTP status code used when redirecting the request.
+	// If set to 0, the request is forwarded internally without a redirect.
+	// If set to a redirect code (e.g., 301, 302), an HTTP redirect is performed.
+	//
+	// Optional. Default value 0 (forward internally).
+	RedirectCode int
+}
+
+// DefaultTrailingSlashConfig is the default AddTrailingSlash middleware config.
+var DefaultTrailingSlashConfig = TrailingSlashConfig{
+	RedirectCode: 0, // Forward internally by default
+}
+
+// AddTrailingSlash returns a middleware that adds a trailing slash to request URLs
+// that don't already have one. This middleware helps normalize URLs and can be useful
+// for SEO and consistent routing.
+//
+// The middleware can either redirect the client to the URL with trailing slash
+// (when RedirectCode is set) or forward the request internally (when RedirectCode is 0).
+//
+// Security: The middleware includes protection against open redirect vulnerabilities
+// by sanitizing URLs that contain multiple slashes or backslashes.
+//
+// Example usage:
+//
+//	// Default behavior (internal forward)
+//	trailingSlashMiddleware := srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig)
+//
+//	// Redirect with 301 status code
+//	config := srv.TrailingSlashConfig{RedirectCode: 301}
+//	trailingSlashMiddleware := srv.AddTrailingSlash(config)
+//
+//	// Chain with other middleware
+//	handler := srv.MiddlewareChain(
+//		srv.Logging,
+//		srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig),
+//		srv.CORS(srv.DefaultCORSConfig),
+//	)(mux)
+func AddTrailingSlash(config TrailingSlashConfig) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+
+			// Skip if path already has trailing slash or is root
+			if strings.HasSuffix(path, "/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Add trailing slash
+			newPath := path + "/"
+
+			// Build new URI with query string if present
+			uri := newPath
+			if r.URL.RawQuery != "" {
+				uri += "?" + r.URL.RawQuery
+			}
+
+			// Sanitize URI to prevent open redirect attacks
+			uri = sanitizeURI(uri)
+
+			// Handle redirect vs forward
+			if config.RedirectCode != 0 {
+				// Perform HTTP redirect
+				http.Redirect(w, r, uri, config.RedirectCode)
+				return
+			}
+
+			// Forward internally by modifying the request
+			r.URL.Path = newPath
+			r.RequestURI = uri
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// sanitizeURI prevents open redirect attacks by sanitizing URIs that start with
+// multiple slashes or backslashes. Double slashes at the beginning of a URI
+// can be interpreted as absolute URIs by browsers, making applications vulnerable
+// to open redirect attacks.
+func sanitizeURI(uri string) string {
+	// Replace multiple leading slashes/backslashes with a single slash
+	if len(uri) > 1 && (uri[0] == '\\' || uri[0] == '/') && (uri[1] == '\\' || uri[1] == '/') {
+		uri = "/" + strings.TrimLeft(uri, `/\`)
+	}
+	return uri
+}

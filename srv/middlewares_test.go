@@ -695,3 +695,318 @@ func TestCORS_Integration(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", rec.Code)
 	}
 }
+
+// =============================================================================
+// AddTrailingSlash Middleware Tests
+// =============================================================================
+
+func TestAddTrailingSlash_DefaultConfig(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check that path was modified internally
+		w.Header().Set("X-Final-Path", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success"))
+	})
+
+	middleware := AddTrailingSlash(DefaultTrailingSlashConfig)
+	wrapped := middleware(handler)
+
+	t.Run("adds trailing slash to path without slash", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/users", nil)
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+
+		finalPath := rec.Header().Get("X-Final-Path")
+		if finalPath != "/users/" {
+			t.Errorf("Expected path to be '/users/', got '%s'", finalPath)
+		}
+
+		if rec.Body.String() != "success" {
+			t.Errorf("Expected body 'success', got '%s'", rec.Body.String())
+		}
+	})
+
+	t.Run("preserves trailing slash when already present", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/users/", nil)
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+
+		finalPath := rec.Header().Get("X-Final-Path")
+		if finalPath != "/users/" {
+			t.Errorf("Expected path to remain '/users/', got '%s'", finalPath)
+		}
+	})
+
+	t.Run("preserves root path", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil)
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+
+		finalPath := rec.Header().Get("X-Final-Path")
+		if finalPath != "/" {
+			t.Errorf("Expected path to remain '/', got '%s'", finalPath)
+		}
+	})
+
+	t.Run("preserves query string", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/users?page=1&limit=10", nil)
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+
+		finalPath := rec.Header().Get("X-Final-Path")
+		if finalPath != "/users/" {
+			t.Errorf("Expected path to be '/users/', got '%s'", finalPath)
+		}
+
+		// Check that query string is preserved in the request
+		if req.URL.RawQuery != "page=1&limit=10" {
+			t.Errorf("Expected query string to be preserved, got '%s'", req.URL.RawQuery)
+		}
+	})
+}
+
+func TestAddTrailingSlash_RedirectConfig(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// This should not be called when redirecting
+		t.Error("Handler should not be called when redirecting")
+	})
+
+	config := TrailingSlashConfig{RedirectCode: 301}
+	middleware := AddTrailingSlash(config)
+	wrapped := middleware(handler)
+
+	t.Run("redirects to path with trailing slash", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/users", nil)
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req)
+
+		if rec.Code != 301 {
+			t.Errorf("Expected status 301, got %d", rec.Code)
+		}
+
+		location := rec.Header().Get("Location")
+		if location != "/api/users/" {
+			t.Errorf("Expected Location header to be '/api/users/', got '%s'", location)
+		}
+	})
+
+	t.Run("redirects with query string preserved", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/users?page=1&sort=name", nil)
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req)
+
+		if rec.Code != 301 {
+			t.Errorf("Expected status 301, got %d", rec.Code)
+		}
+
+		location := rec.Header().Get("Location")
+		if location != "/api/users/?page=1&sort=name" {
+			t.Errorf("Expected Location header to be '/api/users/?page=1&sort=name', got '%s'", location)
+		}
+	})
+
+	t.Run("does not redirect when slash already present", func(t *testing.T) {
+		normalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		normalWrapped := middleware(normalHandler)
+
+		req := httptest.NewRequest("GET", "/api/users/", nil)
+		rec := httptest.NewRecorder()
+
+		normalWrapped.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+
+		location := rec.Header().Get("Location")
+		if location != "" {
+			t.Errorf("Expected no Location header, got '%s'", location)
+		}
+	})
+}
+
+func TestAddTrailingSlash_SecuritySanitization(t *testing.T) {
+	config := TrailingSlashConfig{RedirectCode: 302}
+	middleware := AddTrailingSlash(config)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("Handler should not be called when redirecting")
+	})
+	wrapped := middleware(handler)
+
+	tests := []struct {
+		name         string
+		path         string
+		expectedPath string
+		description  string
+	}{
+		{
+			name:         "normal path",
+			path:         "/users",
+			expectedPath: "/users/",
+			description:  "normal path should work as expected",
+		},
+		{
+			name:         "path with single slash",
+			path:         "/users",
+			expectedPath: "/users/",
+			description:  "single slash should be handled normally",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", test.path, nil)
+			rec := httptest.NewRecorder()
+
+			wrapped.ServeHTTP(rec, req)
+
+			if rec.Code != 302 {
+				t.Errorf("Expected status 302, got %d", rec.Code)
+			}
+
+			location := rec.Header().Get("Location")
+			if location != test.expectedPath {
+				t.Errorf("Expected Location header to be '%s', got '%s'", test.expectedPath, location)
+			}
+		})
+	}
+}
+
+func TestAddTrailingSlash_Integration(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-App", "test")
+		w.Header().Set("X-Final-Path", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success"))
+	})
+
+	// Chain AddTrailingSlash with other middleware
+	wrapped := MiddlewareChain(
+		Logging,
+		AddTrailingSlash(DefaultTrailingSlashConfig),
+		CORS(DefaultCORSConfig),
+		Recover,
+	)(handler)
+
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.Header.Set("Origin", "https://example.com")
+	req.Header.Set("User-Agent", "test-client")
+	rec := httptest.NewRecorder()
+
+	logOutput := captureLogs(t, func() {
+		wrapped.ServeHTTP(rec, req)
+	})
+
+	// Check that trailing slash was added
+	finalPath := rec.Header().Get("X-Final-Path")
+	if finalPath != "/api/test/" {
+		t.Errorf("Expected path to be '/api/test/', got '%s'", finalPath)
+	}
+
+	// Check that CORS headers are set
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("Expected CORS headers to be set")
+	}
+
+	// Check that logging middleware works
+	if !strings.Contains(logOutput, "request completed") {
+		t.Error("Expected logging middleware to work")
+	}
+
+	// Check that the handler was executed
+	if rec.Header().Get("X-App") != "test" {
+		t.Error("Expected handler to be executed")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestSanitizeURI(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "normal URI",
+			input:    "/users/",
+			expected: "/users/",
+		},
+		{
+			name:     "URI with query",
+			input:    "/users/?page=1",
+			expected: "/users/?page=1",
+		},
+		{
+			name:     "double slash",
+			input:    "//malicious.com",
+			expected: "/malicious.com",
+		},
+		{
+			name:     "backslash and slash",
+			input:    "\\/malicious.com",
+			expected: "/malicious.com",
+		},
+		{
+			name:     "multiple slashes",
+			input:    "///evil.com",
+			expected: "/evil.com",
+		},
+		{
+			name:     "mixed slashes and backslashes",
+			input:    "//\\//evil.com",
+			expected: "/evil.com",
+		},
+		{
+			name:     "single slash (safe)",
+			input:    "/safe/path",
+			expected: "/safe/path",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "single character",
+			input:    "/",
+			expected: "/",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := sanitizeURI(test.input)
+			if result != test.expected {
+				t.Errorf("sanitizeURI(%q) = %q, want %q", test.input, result, test.expected)
+			}
+		})
+	}
+}

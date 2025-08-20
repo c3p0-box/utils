@@ -8,7 +8,7 @@ The `srv` package provides comprehensive HTTP server utilities for Go applicatio
 - **🔀 Enhanced Router**: Extended ServeMux with RESTful HTTP method helpers
 - **🔄 URL Reversing**: Named routes with automatic URL generation and parameter substitution
 - **🔗 Middleware System**: Composable HTTP middleware with easy chaining
-- **📊 Built-in Middleware**: Logging, panic recovery, and CORS middleware included
+- **📊 Built-in Middleware**: Logging, panic recovery, CORS, and trailing slash middleware included
 - **🛑 Graceful Shutdown**: HTTP server with signal-based graceful shutdown
 - **📝 Structured Logging**: Integration with Go's structured logging (`log/slog`)
 - **🔗 ERM Integration**: Uses the erm package for standardized error handling and HTTP status codes
@@ -331,14 +331,26 @@ handler := srv.CORS(corsConfig)(mux)
 ```
 Handles Cross-Origin Resource Sharing with configurable origins, methods, headers, and security options
 
+**Trailing Slash Middleware**
+```go
+// Default configuration (internal forward)
+handler := srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig)(mux)
+
+// Redirect configuration
+redirectConfig := srv.TrailingSlashConfig{RedirectCode: 301}
+handler := srv.AddTrailingSlash(redirectConfig)(mux)
+```
+Adds trailing slashes to URLs for consistency and SEO. Can either redirect or forward internally
+
 #### Middleware Chaining
 ```go
 // Chain multiple middleware (applied in reverse order)
 handler := srv.MiddlewareChain(
-    srv.Logging,                    // Outermost: logs all requests
-    srv.Recover,                    // Recovers from panics
-    srv.CORS(srv.DefaultCORSConfig), // Built-in CORS middleware
-    RateLimiting,                   // Innermost: rate limiting
+    srv.Logging,                                // Outermost: logs all requests
+    srv.Recover,                                // Recovers from panics
+    srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig), // URL normalization
+    srv.CORS(srv.DefaultCORSConfig),           // Built-in CORS middleware
+    RateLimiting,                               // Innermost: rate limiting
 )(mux)
 ```
 
@@ -466,10 +478,11 @@ corsMiddleware := srv.CORS(corsConfig)
 // Chain all middleware
 mux := srv.NewMux()
 handler := srv.MiddlewareChain(
-    srv.Logging,        // Log all requests
-    srv.Recover,        // Panic recovery
-    corsMiddleware,     // CORS headers with custom config
-    Authentication,     // JWT authentication
+    srv.Logging,                                // Log all requests
+    srv.Recover,                                // Panic recovery
+    srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig), // URL normalization
+    corsMiddleware,                             // CORS headers with custom config
+    Authentication,                             // JWT authentication
 )(mux)
 ```
 
@@ -643,12 +656,12 @@ go test -bench=. ./srv
 - ✅ **HttpContext**: Value store, request/response methods, thread safety
 - ✅ **Mux**: HTTP method helpers, routing, integration tests
 - ✅ **URL Reversing**: Named routes, parameter substitution, edge cases, integration
-- ✅ **Middleware**: Type safety, chaining, logging, recovery, CORS
+- ✅ **Middleware**: Type safety, chaining, logging, recovery, CORS, trailing slash
 - ✅ **RunServer**: Parameter validation, error handling, cleanup
 - ✅ **Integration**: Cross-component functionality tests
 - ✅ **Benchmarks**: Performance testing for all components
 
-**Current Coverage**: 93.6% of statements
+**Current Coverage**: 94.2% of statements
 
 ## Performance
 
@@ -667,11 +680,12 @@ Place middleware in logical order - logging first, authentication/authorization 
 
 ```go
 handler := srv.MiddlewareChain(
-    srv.Logging,                    // First: log everything
-    srv.Recover,                    // Second: catch panics
-    srv.CORS(srv.DefaultCORSConfig), // Third: CORS headers
-    Authentication,                 // Fourth: auth before business logic
-    RateLimiting,                   // Last: rate limiting
+    srv.Logging,                                // First: log everything
+    srv.Recover,                                // Second: catch panics
+    srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig), // Third: URL normalization
+    srv.CORS(srv.DefaultCORSConfig),           // Fourth: CORS headers
+    Authentication,                             // Fifth: auth before business logic
+    RateLimiting,                               // Last: rate limiting
 )(mux)
 ```
 
@@ -716,7 +730,23 @@ prodCorsConfig := srv.CORSConfig{
 corsMiddleware := srv.CORS(prodCorsConfig)
 ```
 
-### 5. Resource Cleanup
+### 5. Trailing Slash Configuration
+Configure trailing slash behavior based on your needs:
+
+```go
+// Default - internal forward (no redirect)
+trailingSlashMiddleware := srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig)
+
+// SEO-friendly permanent redirect
+seoConfig := srv.TrailingSlashConfig{RedirectCode: 301}
+trailingSlashMiddleware := srv.AddTrailingSlash(seoConfig)
+
+// Temporary redirect for testing
+testConfig := srv.TrailingSlashConfig{RedirectCode: 302}
+trailingSlashMiddleware := srv.AddTrailingSlash(testConfig)
+```
+
+### 6. Resource Cleanup
 Always provide cleanup functions for graceful shutdown:
 
 ```go
