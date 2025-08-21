@@ -1076,6 +1076,15 @@ func TestNilHandling(t *testing.T) {
 	if nilErr.LocalizedErrMap(language.English) != nil {
 		t.Error("LocalizedErrMap() should return nil for nil receiver")
 	}
+
+	// Test new field message key methods
+	if nilErr.FieldMessageKey() != "" {
+		t.Error("FieldMessageKey() should return empty string for nil receiver")
+	}
+
+	if nilErr.WithFieldMessageKey("test") != nil {
+		t.Error("WithFieldMessageKey() should return nil for nil receiver")
+	}
 }
 
 // TestErrorChaining tests complex error scenarios
@@ -1149,6 +1158,295 @@ func TestEdgeCases(t *testing.T) {
 // =============================================================================
 // Internal Function Edge Cases
 // =============================================================================
+
+// =============================================================================
+// Field Localization Tests
+// =============================================================================
+
+// TestFieldMessageKey tests the FieldMessageKey functionality
+func TestFieldMessageKey(t *testing.T) {
+	t.Run("FieldMessageKey method", func(t *testing.T) {
+		// Test with nil receiver
+		var nilErr *StackError
+		if nilErr.FieldMessageKey() != "" {
+			t.Error("FieldMessageKey() should return empty string for nil receiver")
+		}
+
+		// Test with no field message key set
+		err := NewValidationError("validation.required", "email", "")
+		if err.FieldMessageKey() != "" {
+			t.Error("FieldMessageKey() should return empty string when not set")
+		}
+
+		// Test with field message key set
+		errWithKey := err.WithFieldMessageKey("fields.email")
+		if errWithKey.FieldMessageKey() != "fields.email" {
+			t.Errorf("FieldMessageKey() = %q, want %q", errWithKey.FieldMessageKey(), "fields.email")
+		}
+	})
+
+	t.Run("WithFieldMessageKey method", func(t *testing.T) {
+		// Test with nil receiver
+		var nilErr *StackError
+		result := nilErr.WithFieldMessageKey("fields.email")
+		if result != nil {
+			t.Error("WithFieldMessageKey() should return nil for nil receiver")
+		}
+
+		// Test setting field message key
+		err := NewValidationError("validation.required", "email", "")
+		errWithKey := err.WithFieldMessageKey("fields.email")
+
+		if errWithKey == err {
+			t.Error("WithFieldMessageKey() should return new instance")
+		}
+
+		if errWithKey.FieldMessageKey() != "fields.email" {
+			t.Errorf("FieldMessageKey() = %q, want %q", errWithKey.FieldMessageKey(), "fields.email")
+		}
+
+		// Original should be unchanged
+		if err.FieldMessageKey() != "" {
+			t.Error("Original error should be unchanged after WithFieldMessageKey()")
+		}
+
+		// Test chaining
+		chained := err.WithFieldMessageKey("fields.email").WithParam("test", "value")
+		if chained.FieldMessageKey() != "fields.email" {
+			t.Error("Chaining should preserve field message key")
+		}
+		if chained.Params()["test"] != "value" {
+			t.Error("Chaining should preserve additional parameters")
+		}
+	})
+}
+
+// TestFieldLocalization tests the field localization functionality
+func TestFieldLocalization(t *testing.T) {
+	t.Run("field localization with mock translations", func(t *testing.T) {
+		// Since we can't easily mock the i18n system in tests,
+		// we test the fallback behavior when no translation is available
+		err := NewValidationError("validation.required", "email", "", "fields.email")
+
+		// Should use field name as fallback when translation not available
+		errorMsg := err.Error()
+		if !strings.Contains(errorMsg, "email") {
+			t.Errorf("Error message should contain field name as fallback, got: %q", errorMsg)
+		}
+
+		// Test localized error
+		localizedMsg := err.LocalizedError(language.Spanish)
+		if !strings.Contains(localizedMsg, "email") {
+			t.Errorf("Localized error should contain field name as fallback, got: %q", localizedMsg)
+		}
+	})
+
+	t.Run("field localization in error maps", func(t *testing.T) {
+		container := New(http.StatusBadRequest, "Validation errors", nil)
+
+		err1 := NewValidationError("validation.required", "email", "", "fields.email")
+		err2 := NewValidationError("validation.min_length", "password", "123", "fields.password").WithParam("min", 8)
+
+		container.AddError(err1)
+		container.AddError(err2)
+
+		errMap := container.ErrMap()
+		if len(errMap) != 2 {
+			t.Fatalf("Expected 2 error map entries, got %d", len(errMap))
+		}
+
+		// Should have entries for both fields
+		if _, exists := errMap["email"]; !exists {
+			t.Error("Error map should contain email field")
+		}
+		if _, exists := errMap["password"]; !exists {
+			t.Error("Error map should contain password field")
+		}
+
+		// Test localized error map
+		localizedErrMap := container.LocalizedErrMap(language.English)
+		if len(localizedErrMap) != 2 {
+			t.Fatalf("Expected 2 localized error map entries, got %d", len(localizedErrMap))
+		}
+	})
+}
+
+// TestNewValidationErrorWithFieldKey tests the NewValidationError constructor with field message key
+func TestNewValidationErrorWithFieldKey(t *testing.T) {
+	t.Run("basic creation", func(t *testing.T) {
+		err := NewValidationError("validation.required", "email", "test@example.com", "fields.email")
+
+		if err.MessageKey() != "validation.required" {
+			t.Errorf("MessageKey() = %q, want %q", err.MessageKey(), "validation.required")
+		}
+
+		if err.FieldName() != "email" {
+			t.Errorf("FieldName() = %q, want %q", err.FieldName(), "email")
+		}
+
+		if err.FieldMessageKey() != "fields.email" {
+			t.Errorf("FieldMessageKey() = %q, want %q", err.FieldMessageKey(), "fields.email")
+		}
+
+		if err.Value() != "test@example.com" {
+			t.Errorf("Value() = %v, want %v", err.Value(), "test@example.com")
+		}
+
+		if err.Code() != http.StatusBadRequest {
+			t.Errorf("Code() = %d, want %d", err.Code(), http.StatusBadRequest)
+		}
+	})
+
+	t.Run("with parameters", func(t *testing.T) {
+		err := NewValidationError("validation.min_length", "password", "123", "fields.password").
+			WithParam("min", 8)
+
+		if err.Params()["min"] != 8 {
+			t.Errorf("Expected min parameter to be 8, got %v", err.Params()["min"])
+		}
+
+		// Should still have field message key
+		if err.FieldMessageKey() != "fields.password" {
+			t.Errorf("FieldMessageKey() = %q, want %q", err.FieldMessageKey(), "fields.password")
+		}
+	})
+}
+
+// TestConvenienceConstructorsWithFieldKey tests the convenience constructors with field keys
+func TestConvenienceConstructorsWithFieldKey(t *testing.T) {
+	tests := []struct {
+		name          string
+		constructor   func() Error
+		expectedMsg   string
+		expectedKey   string
+		expectedField string
+	}{
+		{
+			name: "RequiredError with field key",
+			constructor: func() Error {
+				return RequiredError("email", "", "fields.email")
+			},
+			expectedMsg:   "validation.required",
+			expectedKey:   "fields.email",
+			expectedField: "email",
+		},
+		{
+			name: "MinLengthError with field key",
+			constructor: func() Error {
+				return MinLengthError("password", "123", 8, "fields.password")
+			},
+			expectedMsg:   "validation.min_length",
+			expectedKey:   "fields.password",
+			expectedField: "password",
+		},
+		{
+			name: "MaxLengthError with field key",
+			constructor: func() Error {
+				return MaxLengthError("description", "very long text", 100, "fields.description")
+			},
+			expectedMsg:   "validation.max_length",
+			expectedKey:   "fields.description",
+			expectedField: "description",
+		},
+		{
+			name: "EmailError with field key",
+			constructor: func() Error {
+				return EmailError("email", "invalid-email", "fields.email")
+			},
+			expectedMsg:   "validation.email",
+			expectedKey:   "fields.email",
+			expectedField: "email",
+		},
+		{
+			name: "DuplicateError with field key",
+			constructor: func() Error {
+				return DuplicateError("username", "john", "fields.username")
+			},
+			expectedMsg:   "validation.duplicate",
+			expectedKey:   "fields.username",
+			expectedField: "username",
+		},
+		{
+			name: "InvalidError with field key",
+			constructor: func() Error {
+				return InvalidError("format", "invalid-data", "fields.format")
+			},
+			expectedMsg:   "validation.invalid",
+			expectedKey:   "fields.format",
+			expectedField: "format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.constructor()
+
+			if err.MessageKey() != tt.expectedMsg {
+				t.Errorf("MessageKey() = %q, want %q", err.MessageKey(), tt.expectedMsg)
+			}
+
+			if err.FieldMessageKey() != tt.expectedKey {
+				t.Errorf("FieldMessageKey() = %q, want %q", err.FieldMessageKey(), tt.expectedKey)
+			}
+
+			if err.FieldName() != tt.expectedField {
+				t.Errorf("FieldName() = %q, want %q", err.FieldName(), tt.expectedField)
+			}
+
+			if err.Code() != http.StatusBadRequest {
+				t.Errorf("Code() = %d, want %d", err.Code(), http.StatusBadRequest)
+			}
+
+			// Test that error message is generated
+			if err.Error() == "" {
+				t.Error("Error() should return non-empty message")
+			}
+		})
+	}
+}
+
+// TestNumericFieldConstructors tests numeric value error constructors with field keys
+func TestNumericFieldConstructors(t *testing.T) {
+	t.Run("MinValueError with field key", func(t *testing.T) {
+		err := MinValueError("age", 16, 18, "fields.age")
+
+		if err.MessageKey() != "validation.min_value" {
+			t.Errorf("MessageKey() = %q, want %q", err.MessageKey(), "validation.min_value")
+		}
+
+		if err.FieldMessageKey() != "fields.age" {
+			t.Errorf("FieldMessageKey() = %q, want %q", err.FieldMessageKey(), "fields.age")
+		}
+
+		if err.Value() != 16 {
+			t.Errorf("Value() = %v, want %v", err.Value(), 16)
+		}
+
+		if err.Params()["min"] != 18 {
+			t.Errorf("Expected min parameter to be 18, got %v", err.Params()["min"])
+		}
+	})
+
+	t.Run("MaxValueError with field key", func(t *testing.T) {
+		err := MaxValueError("age", 150, 100, "fields.age")
+
+		if err.MessageKey() != "validation.max_value" {
+			t.Errorf("MessageKey() = %q, want %q", err.MessageKey(), "validation.max_value")
+		}
+
+		if err.FieldMessageKey() != "fields.age" {
+			t.Errorf("FieldMessageKey() = %q, want %q", err.FieldMessageKey(), "fields.age")
+		}
+
+		if err.Value() != 150 {
+			t.Errorf("Value() = %v, want %v", err.Value(), 150)
+		}
+
+		if err.Params()["max"] != 100 {
+			t.Errorf("Expected max parameter to be 100, got %v", err.Params()["max"])
+		}
+	})
+}
 
 // TestInternalFunctionEdgeCases improves coverage for internal functions
 func TestInternalFunctionEdgeCases(t *testing.T) {

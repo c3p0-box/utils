@@ -72,6 +72,71 @@ err := erm.InvalidError("format", "invalid-data")
 err := erm.NotFound("user", dbErr) // 404 error with message key "error.not_found"
 ```
 
+### Field Localization
+
+ERM supports localizing field names in error messages using i18n message keys, allowing for user-friendly, localized field names:
+
+```go
+// Standard approach - field names not localized
+err := erm.RequiredError("email", "")
+fmt.Println(err.Error()) // "email is required"
+
+// Field localization using message keys as optional parameter
+err := erm.RequiredError("email", "", "fields.email")
+// If "fields.email" translates to "Email Address", displays: "Email Address is required"
+
+// Other localized field constructors
+err := erm.MinLengthError("password", "123", 8, "fields.password")
+err := erm.EmailError("email", "invalid@email", "fields.email")
+err := erm.DuplicateError("username", "john", "fields.username")
+
+// Manual field localization
+err := erm.NewValidationError("validation.required", "user_email", "", "fields.user_email")
+
+// Add field localization to existing errors using WithFieldMessageKey
+err := erm.RequiredError("email", "").WithFieldMessageKey("fields.email")
+```
+
+#### Setting Up Field Translations
+
+Define field name translations in your message files:
+
+**locales/en.json**
+```json
+{
+  "fields.email": {
+    "other": "Email Address"
+  },
+  "fields.password": {
+    "other": "Password"
+  },
+  "fields.username": {
+    "other": "Username"
+  },
+  "fields.first_name": {
+    "other": "First Name"
+  }
+}
+```
+
+**locales/es.json**
+```json
+{
+  "fields.email": {
+    "other": "Dirección de Email"
+  },
+  "fields.password": {
+    "other": "Contraseña"
+  },
+  "fields.username": {
+    "other": "Nombre de Usuario"
+  },
+  "fields.first_name": {
+    "other": "Nombre"
+  }
+}
+```
+
 ### Internationalization Setup
 
 ```go
@@ -186,6 +251,14 @@ errorMap := container.ErrMap() // Uses English
 errorMap = container.LocalizedErrMap(language.Spanish)
 
 // Format: {"email": ["email is required"], "password": ["password must be at least 8 characters long"]}
+
+// With field localization using optional field message key parameter
+containerWithFields := erm.New(http.StatusBadRequest, "Validation errors", nil)
+containerWithFields.AddError(erm.RequiredError("email", "", "fields.email"))
+containerWithFields.AddError(erm.MinLengthError("password", "123", 8, "fields.password"))
+
+localizedMap := containerWithFields.LocalizedErrMap(language.Spanish)
+// Format: {"email": ["Dirección de Email es requerido"], "password": ["Contraseña debe tener al menos 8 caracteres"]}
 ```
 
 ## Migration from SetLocalizer System
@@ -217,12 +290,17 @@ spanishLocalizer := erm.GetLocalizer(language.Spanish)
 
 ### Validation Constructors
 
-- `NewValidationError(messageKey, fieldName string, value interface{}) Error`
-- `RequiredError(fieldName string, value interface{}) Error`
-- `MinLengthError(fieldName string, value interface{}, min int) Error`
-- `EmailError(fieldName string, value interface{}) Error`
-- `DuplicateError(fieldName string, value interface{}) Error`
-- `InvalidError(fieldName string, value interface{}) Error`
+All validation constructors now support optional field message keys for localization:
+
+- `NewValidationError(messageKey, fieldName string, value interface{}, fieldMessageKey ...string) Error`
+- `RequiredError(fieldName string, value interface{}, fieldMessageKey ...string) Error`
+- `MinLengthError(fieldName string, value interface{}, min int, fieldMessageKey ...string) Error`
+- `MaxLengthError(fieldName string, value interface{}, max int, fieldMessageKey ...string) Error`
+- `EmailError(fieldName string, value interface{}, fieldMessageKey ...string) Error`
+- `MinValueError(fieldName string, value interface{}, min interface{}, fieldMessageKey ...string) Error`
+- `MaxValueError(fieldName string, value interface{}, max interface{}, fieldMessageKey ...string) Error`
+- `DuplicateError(fieldName string, value interface{}, fieldMessageKey ...string) Error`
+- `InvalidError(fieldName string, value interface{}, fieldMessageKey ...string) Error`
 - `NotFound(fieldName string, err error) Error` - Creates 404 error with "error.not_found" message key
 
 ### Error Interface
@@ -234,9 +312,12 @@ type Error interface {
     LocalizedErrMap(language.Tag) map[string][]string
     
     MessageKey() string                         // i18n message key
-    FieldName() string
+    FieldName() string                          // Field name for validation
+    FieldMessageKey() string                    // i18n message key for field name
     Value() interface{}
     Params() map[string]interface{}
+    
+    WithFieldMessageKey(string) Error           // Set field message key for localization
     
     AddError(Error)                             // Error collection (mutable)
     AddErrors([]Error)                          // Batch error collection (mutable)

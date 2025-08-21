@@ -12,6 +12,27 @@
 // implemented by StackError. This provides flexibility while maintaining
 // type safety and compatibility with Go's standard error handling.
 //
+// # Field Localization
+//
+// The package supports localizing field names in error messages using i18n message keys.
+// This allows applications to display user-friendly field names that are properly
+// localized for different languages:
+//
+//	// Standard field name (not localized)
+//	err := erm.RequiredError("email", "")
+//	fmt.Println(err.Error()) // "email is required"
+//
+//	// Localized field name using message key
+//	err := erm.RequiredErrorWithFieldKey("email", "fields.email", "")
+//	// If "fields.email" translates to "Email Address", displays: "Email Address is required"
+//
+//	// Manual field localization
+//	err := erm.NewValidationError("validation.required", "user_email", "").
+//		WithFieldMessageKey("fields.user_email")
+//
+// Field message keys are resolved using the same i18n system as validation messages,
+// falling back to the original field name if no translation is available.
+//
 // # Basic Usage
 //
 //	// Create errors with automatic operation detection
@@ -112,6 +133,9 @@ type Error interface {
 	// FieldName returns the field name for validation errors
 	FieldName() string
 
+	// FieldMessageKey returns the i18n message key for the field name
+	FieldMessageKey() string
+
 	// Value returns the value being validated for validation errors
 	Value() interface{}
 
@@ -147,6 +171,9 @@ type Error interface {
 	// WithFieldName sets the field name being validated
 	WithFieldName(fieldName string) Error
 
+	// WithFieldMessageKey sets the field message key for localization
+	WithFieldMessageKey(fieldMessageKey string) Error
+
 	// WithValue sets the value being validated
 	WithValue(value interface{}) Error
 
@@ -165,6 +192,7 @@ type Error interface {
 //   - stack: Stack trace as program counters for debugging (only for 500 errors)
 //   - messageKey: i18n message key for localization (e.g., "validation.required")
 //   - fieldName: Field name being validated
+//   - fieldMessageKey: i18n message key for localizing field names (e.g., "fields.email")
 //   - value: Value being validated
 //   - params: Template parameters for i18n substitution
 //   - errors: Child errors for batch validation scenarios (single-level only)
@@ -173,15 +201,16 @@ type Error interface {
 // concurrent access. They satisfy Go's standard error wrapping
 // expectations and work with errors.Is/As functions.
 type StackError struct {
-	code       int
-	msg        string
-	root       error
-	stack      []uintptr
-	messageKey string
-	fieldName  string
-	value      interface{}
-	params     map[string]interface{}
-	errors     []Error
+	code            int
+	msg             string
+	root            error
+	stack           []uintptr
+	messageKey      string
+	fieldName       string
+	fieldMessageKey string
+	value           interface{}
+	params          map[string]interface{}
+	errors          []Error
 }
 
 // =============================================================================
@@ -321,6 +350,15 @@ func (e *StackError) FieldName() string {
 	return e.fieldName
 }
 
+// FieldMessageKey returns the i18n message key for the field name.
+// Returns empty string for nil receivers or if no field message key was set.
+func (e *StackError) FieldMessageKey() string {
+	if e == nil {
+		return ""
+	}
+	return e.fieldMessageKey
+}
+
 // Value returns the value being validated.
 // Returns nil for nil receivers or if no value was set.
 func (e *StackError) Value() interface{} {
@@ -356,6 +394,16 @@ func (e *StackError) WithFieldName(fieldName string) Error {
 	}
 	err := *e
 	err.fieldName = fieldName
+	return &err
+}
+
+// WithFieldMessageKey sets the field message key for localization.
+func (e *StackError) WithFieldMessageKey(fieldMessageKey string) Error {
+	if e == nil {
+		return nil
+	}
+	err := *e
+	err.fieldMessageKey = fieldMessageKey
 	return &err
 }
 
@@ -520,7 +568,7 @@ func (e *StackError) localizeMessage(tag language.Tag) string {
 		return ""
 	}
 
-	templateData := e.buildTemplateData()
+	templateData := e.buildTemplateData(tag)
 	msg, err := localizer.Localize(&LocalizeConfig{
 		MessageID:    e.messageKey,
 		TemplateData: templateData,
@@ -531,12 +579,28 @@ func (e *StackError) localizeMessage(tag language.Tag) string {
 	return ""
 }
 
-// buildTemplateData creates template data for localization.
-func (e *StackError) buildTemplateData() map[string]interface{} {
+// buildTemplateData creates template data for localization with support for localized field names.
+func (e *StackError) buildTemplateData(tag language.Tag) map[string]interface{} {
 	templateData := make(map[string]interface{})
 
 	if e.fieldName != "" {
-		templateData["field"] = e.fieldName
+		fieldDisplayName := e.fieldName
+
+		// Try to get localized field name if field message key is available
+		if e.fieldMessageKey != "" {
+			localizer := GetLocalizer(tag)
+			if localizer != nil {
+				localizedFieldName := localizer.MustLocalize(&LocalizeConfig{
+					MessageID: e.fieldMessageKey,
+				})
+				// If translation found (localizer returns the key itself if not found)
+				if localizedFieldName != e.fieldMessageKey {
+					fieldDisplayName = localizedFieldName
+				}
+			}
+		}
+
+		templateData["field"] = fieldDisplayName
 	}
 	if e.value != nil {
 		templateData["value"] = e.value
@@ -785,16 +849,24 @@ func Internal(msg string, err error) Error {
 // NewValidationError creates a new validation error with the specified message key, field name, and value.
 // This is the primary constructor for validation errors that will be used by the validation package.
 // All validation errors are created with HTTP 400 Bad Request status.
+// Optionally accepts a field message key for localization as the last parameter.
 //
 // Example:
 //
 //	err := erm.NewValidationError("validation.required", "email", "")
 //	err = err.WithParam("min", 5)
-func NewValidationError(messageKey, fieldName string, value interface{}) Error {
-	return New(http.StatusBadRequest, "", nil).
+//
+//	// With field localization:
+//	err := erm.NewValidationError("validation.required", "email", "", "fields.email")
+func NewValidationError(messageKey, fieldName string, value interface{}, fieldMessageKey ...string) Error {
+	err := New(http.StatusBadRequest, "", nil).
 		WithMessageKey(messageKey).
 		WithFieldName(fieldName).
 		WithValue(value)
+	if len(fieldMessageKey) > 0 && fieldMessageKey[0] != "" {
+		err = err.WithFieldMessageKey(fieldMessageKey[0])
+	}
+	return err
 }
 
 // Common validation error constructors using standard message keys.
@@ -802,45 +874,85 @@ func NewValidationError(messageKey, fieldName string, value interface{}) Error {
 // proper internationalization support.
 
 // RequiredError creates a "required" validation error.
-func RequiredError(fieldName string, value interface{}) Error {
-	return NewValidationError(MsgRequired, fieldName, value)
+// Optionally accepts a field message key for localization as the last parameter.
+func RequiredError(fieldName string, value interface{}, fieldMessageKey ...string) Error {
+	err := NewValidationError(MsgRequired, fieldName, value)
+	if len(fieldMessageKey) > 0 && fieldMessageKey[0] != "" {
+		err = err.WithFieldMessageKey(fieldMessageKey[0])
+	}
+	return err
 }
 
 // MinLengthError creates a "min_length" validation error with minimum length parameter.
-func MinLengthError(fieldName string, value interface{}, min int) Error {
-	return NewValidationError(MsgMinLength, fieldName, value).
+// Optionally accepts a field message key for localization as the last parameter.
+func MinLengthError(fieldName string, value interface{}, min int, fieldMessageKey ...string) Error {
+	err := NewValidationError(MsgMinLength, fieldName, value).
 		WithParam("min", min)
+	if len(fieldMessageKey) > 0 && fieldMessageKey[0] != "" {
+		err = err.WithFieldMessageKey(fieldMessageKey[0])
+	}
+	return err
 }
 
 // MaxLengthError creates a "max_length" validation error with maximum length parameter.
-func MaxLengthError(fieldName string, value interface{}, max int) Error {
-	return NewValidationError(MsgMaxLength, fieldName, value).
+// Optionally accepts a field message key for localization as the last parameter.
+func MaxLengthError(fieldName string, value interface{}, max int, fieldMessageKey ...string) Error {
+	err := NewValidationError(MsgMaxLength, fieldName, value).
 		WithParam("max", max)
+	if len(fieldMessageKey) > 0 && fieldMessageKey[0] != "" {
+		err = err.WithFieldMessageKey(fieldMessageKey[0])
+	}
+	return err
 }
 
 // EmailError creates an "email" validation error.
-func EmailError(fieldName string, value interface{}) Error {
-	return NewValidationError(MsgEmail, fieldName, value)
+// Optionally accepts a field message key for localization as the last parameter.
+func EmailError(fieldName string, value interface{}, fieldMessageKey ...string) Error {
+	err := NewValidationError(MsgEmail, fieldName, value)
+	if len(fieldMessageKey) > 0 && fieldMessageKey[0] != "" {
+		err = err.WithFieldMessageKey(fieldMessageKey[0])
+	}
+	return err
 }
 
 // MinValueError creates a "min_value" validation error with minimum value parameter.
-func MinValueError(fieldName string, value interface{}, min interface{}) Error {
-	return NewValidationError(MsgMin, fieldName, value).
+// Optionally accepts a field message key for localization as the last parameter.
+func MinValueError(fieldName string, value interface{}, min interface{}, fieldMessageKey ...string) Error {
+	err := NewValidationError(MsgMin, fieldName, value).
 		WithParam("min", min)
+	if len(fieldMessageKey) > 0 && fieldMessageKey[0] != "" {
+		err = err.WithFieldMessageKey(fieldMessageKey[0])
+	}
+	return err
 }
 
 // MaxValueError creates a "max_value" validation error with maximum value parameter.
-func MaxValueError(fieldName string, value interface{}, max interface{}) Error {
-	return NewValidationError(MsgMax, fieldName, value).
+// Optionally accepts a field message key for localization as the last parameter.
+func MaxValueError(fieldName string, value interface{}, max interface{}, fieldMessageKey ...string) Error {
+	err := NewValidationError(MsgMax, fieldName, value).
 		WithParam("max", max)
+	if len(fieldMessageKey) > 0 && fieldMessageKey[0] != "" {
+		err = err.WithFieldMessageKey(fieldMessageKey[0])
+	}
+	return err
 }
 
 // DuplicateError creates a "duplicate" validation error for unique constraint violations.
-func DuplicateError(fieldName string, value interface{}) Error {
-	return NewValidationError(MsgDuplicate, fieldName, value)
+// Optionally accepts a field message key for localization as the last parameter.
+func DuplicateError(fieldName string, value interface{}, fieldMessageKey ...string) Error {
+	err := NewValidationError(MsgDuplicate, fieldName, value)
+	if len(fieldMessageKey) > 0 && fieldMessageKey[0] != "" {
+		err = err.WithFieldMessageKey(fieldMessageKey[0])
+	}
+	return err
 }
 
 // InvalidError creates an "invalid" validation error for general invalid values.
-func InvalidError(fieldName string, value interface{}) Error {
-	return NewValidationError(MsgInvalid, fieldName, value)
+// Optionally accepts a field message key for localization as the last parameter.
+func InvalidError(fieldName string, value interface{}, fieldMessageKey ...string) Error {
+	err := NewValidationError(MsgInvalid, fieldName, value)
+	if len(fieldMessageKey) > 0 && fieldMessageKey[0] != "" {
+		err = err.WithFieldMessageKey(fieldMessageKey[0])
+	}
+	return err
 }
