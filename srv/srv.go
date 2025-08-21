@@ -10,10 +10,10 @@
 // Example usage:
 //
 //	mux := srv.NewMux()
-//	mux.Get("users", "/users", func(ctx *srv.HttpContext) error {
+//	mux.Get("users", "/users", func(ctx srv.Context) error {
 //		return ctx.JSON(200, users)
 //	})
-//	mux.Get("user", "/users/{id}", func(ctx *srv.HttpContext) error {
+//	mux.Get("user", "/users/{id}", func(ctx srv.Context) error {
 //		id := ctx.Param("id")
 //		editURL, _ := mux.Reverse("user", map[string]string{"id": id})
 //		return ctx.JSON(200, map[string]interface{}{
@@ -135,13 +135,13 @@ type Route struct {
 	Pattern string // URL pattern (e.g., "/users/{id}")
 }
 
-// HandlerFunc defines a handler function that receives an HttpContext and returns an error.
+// HandlerFunc defines a handler function that receives an Context and returns an error.
 // This allows for more elegant error handling compared to traditional http.HandlerFunc.
 // If the handler returns an error, it will be passed to the configured error handler.
 //
 // Example:
 //
-//	func getUserHandler(ctx *HttpContext) error {
+//	func getUserHandler(ctx *Context) error {
 //	    id := ctx.Param("id")
 //	    user, err := getUserByID(id)
 //	    if err != nil {
@@ -149,7 +149,7 @@ type Route struct {
 //	    }
 //	    return ctx.JSON(200, user)
 //	}
-type HandlerFunc func(ctx *HttpContext) error
+type HandlerFunc func(ctx Context) error
 
 // Mux provides a convenient wrapper around Go's standard http.ServeMux
 // with helper methods for common HTTP operations, RESTful routing, URL reversing, and centralized error handling.
@@ -159,7 +159,7 @@ type HandlerFunc func(ctx *HttpContext) error
 //   - Enhanced HandlerFunc via HTTP method helpers (Get, Post, etc.) with automatic error handling
 type Mux struct {
 	mux        *http.ServeMux
-	errHandler func(ctx *HttpContext, err error)
+	errHandler func(ctx Context, err error)
 	routes     map[string]Route // Named routes for URL reversing, key format: "name"
 	routesMu   sync.RWMutex     // Protects routes map from concurrent access
 }
@@ -170,7 +170,7 @@ type Mux struct {
 func NewMux() *Mux {
 	return &Mux{
 		mux: http.NewServeMux(),
-		errHandler: func(ctx *HttpContext, err error) {
+		errHandler: func(ctx Context, err error) {
 			_ = ctx.String(http.StatusInternalServerError, "Something went wrong")
 		},
 		routes:   make(map[string]Route),
@@ -206,17 +206,17 @@ func (m *Mux) HandleFunc(pattern string, handler http.HandlerFunc) {
 //
 // Example:
 //
-//	mux.ErrorHandler(func(ctx *HttpContext, err error) {
+//	mux.ErrorHandler(func(ctx Context, err error) {
 //	    log.Printf("Handler error: %v", err)
 //	    ctx.JSON(500, map[string]string{"error": err.Error()})
 //	})
-func (m *Mux) ErrorHandler(handler func(c *HttpContext, err error)) {
+func (m *Mux) ErrorHandler(handler func(c Context, err error)) {
 	m.errHandler = handler
 }
 
 // execHandler is an internal method that wraps HandlerFunc with error handling
 // and registers named routes for URL reversing when a name is provided.
-// It creates an HttpContext and passes it to the handler. If the handler returns
+// It creates a Context and passes it to the handler. If the handler returns
 // an error, it calls the configured error handler with the same context.
 // This method is safe for concurrent use.
 func (m *Mux) execHandler(name, method, pattern string, handler HandlerFunc) {

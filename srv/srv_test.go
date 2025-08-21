@@ -213,7 +213,7 @@ func TestMux_HTTPMethods(t *testing.T) {
 	for _, test := range methods {
 		t.Run(test.name, func(t *testing.T) {
 			called := false
-			test.setup("", test.pattern, func(ctx *HttpContext) error {
+			test.setup("", test.pattern, func(ctx Context) error {
 				called = true
 				ctx.WriteHeader(200)
 				return nil
@@ -253,15 +253,15 @@ func TestMux_Integration(t *testing.T) {
 	mux := NewMux()
 
 	// Set up various routes
-	mux.Get("", "/users", func(ctx *HttpContext) error {
+	mux.Get("", "/users", func(ctx Context) error {
 		return ctx.String(200, "GET users")
 	})
 
-	mux.Post("", "/users", func(ctx *HttpContext) error {
+	mux.Post("", "/users", func(ctx Context) error {
 		return ctx.String(201, "POST users")
 	})
 
-	mux.Get("", "/users/{id}", func(ctx *HttpContext) error {
+	mux.Get("", "/users/{id}", func(ctx Context) error {
 		id := ctx.Param("id")
 		return ctx.String(200, "GET user "+id)
 	})
@@ -303,17 +303,17 @@ func TestMux_ErrorHandler(t *testing.T) {
 	mux := NewMux()
 
 	var capturedError error
-	var capturedContext *HttpContext
+	var capturedContext Context
 
 	// Set custom error handler
-	mux.ErrorHandler(func(ctx *HttpContext, err error) {
+	mux.ErrorHandler(func(ctx Context, err error) {
 		capturedError = err
 		capturedContext = ctx
 		_ = ctx.JSON(400, map[string]string{"error": "Custom error: " + err.Error()})
 	})
 
 	// Register a handler that returns an error
-	mux.Get("", "/error", func(ctx *HttpContext) error {
+	mux.Get("", "/error", func(ctx Context) error {
 		return errors.New("test error")
 	})
 
@@ -348,7 +348,7 @@ func TestMux_DefaultErrorHandler(t *testing.T) {
 	mux := NewMux()
 
 	// Register a handler that returns an error (should use default error handler)
-	mux.Post("", "/error", func(ctx *HttpContext) error {
+	mux.Post("", "/error", func(ctx Context) error {
 		return errors.New("internal error")
 	})
 
@@ -372,7 +372,7 @@ func TestMux_NoErrorHandling(t *testing.T) {
 	mux := NewMux()
 
 	// Register a handler that returns no error
-	mux.Put("", "/success", func(ctx *HttpContext) error {
+	mux.Put("", "/success", func(ctx Context) error {
 		return ctx.JSON(200, map[string]string{"status": "success"})
 	})
 
@@ -396,13 +396,13 @@ func TestMux_ErrorFromResponseMethod(t *testing.T) {
 	mux := NewMux()
 
 	var capturedError error
-	mux.ErrorHandler(func(ctx *HttpContext, err error) {
+	mux.ErrorHandler(func(ctx Context, err error) {
 		capturedError = err
 		_ = ctx.String(500, "Response error occurred")
 	})
 
 	// Register a handler that has an error in the response method
-	mux.Delete("", "/response-error", func(ctx *HttpContext) error {
+	mux.Delete("", "/response-error", func(ctx Context) error {
 		// This should work fine and not trigger error handler
 		return ctx.JSON(200, map[string]string{"message": "success"})
 	})
@@ -431,15 +431,15 @@ func TestMux_NamedRoutes_BasicFunctionality(t *testing.T) {
 	mux := NewMux()
 
 	// Register named routes
-	mux.Get("user-list", "/users", func(ctx *HttpContext) error {
+	mux.Get("user-list", "/users", func(ctx Context) error {
 		return ctx.String(200, "users list")
 	})
 
-	mux.Post("user-create", "/users", func(ctx *HttpContext) error {
+	mux.Post("user-create", "/users", func(ctx Context) error {
 		return ctx.String(201, "user created")
 	})
 
-	mux.Get("user-profile", "/users/{id}", func(ctx *HttpContext) error {
+	mux.Get("user-profile", "/users/{id}", func(ctx Context) error {
 		id := ctx.Param("id")
 		return ctx.String(200, "user "+id)
 	})
@@ -496,7 +496,7 @@ func TestMux_NamedRoutes_AllMethods(t *testing.T) {
 	for _, test := range methods {
 		t.Run(test.name, func(t *testing.T) {
 			called := false
-			test.setup(test.routeName, test.pattern, func(ctx *HttpContext) error {
+			test.setup(test.routeName, test.pattern, func(ctx Context) error {
 				called = true
 				ctx.WriteHeader(200)
 				return nil
@@ -530,15 +530,15 @@ func TestMux_Reverse_BasicURLGeneration(t *testing.T) {
 	mux := NewMux()
 
 	// Register routes
-	mux.Get("user-list", "/users", func(ctx *HttpContext) error {
+	mux.Get("user-list", "/users", func(ctx Context) error {
 		return ctx.String(200, "OK")
 	})
 
-	mux.Post("user-create", "/users", func(ctx *HttpContext) error {
+	mux.Post("user-create", "/users", func(ctx Context) error {
 		return ctx.String(200, "OK")
 	})
 
-	mux.Get("user-profile", "/users/{id}", func(ctx *HttpContext) error {
+	mux.Get("user-profile", "/users/{id}", func(ctx Context) error {
 		return ctx.String(200, "OK")
 	})
 
@@ -604,15 +604,15 @@ func TestMux_Reverse_ParameterSubstitution(t *testing.T) {
 	mux := NewMux()
 
 	// Register routes with various parameter patterns
-	mux.Get("user-profile", "/users/{id}", func(ctx *HttpContext) error {
+	mux.Get("user-profile", "/users/{id}", func(ctx Context) error {
 		return ctx.String(200, "OK")
 	})
 
-	mux.Get("user-posts", "/users/{userId}/posts/{postId}", func(ctx *HttpContext) error {
+	mux.Get("user-posts", "/users/{userId}/posts/{postId}", func(ctx Context) error {
 		return ctx.String(200, "OK")
 	})
 
-	mux.Get("complex-route", "/api/v1/{version}/users/{id}/settings/{setting}", func(ctx *HttpContext) error {
+	mux.Get("complex-route", "/api/v1/{version}/users/{id}/settings/{setting}", func(ctx Context) error {
 		return ctx.String(200, "OK")
 	})
 
@@ -705,19 +705,19 @@ func TestMux_Reverse_SameNameDifferentMethods(t *testing.T) {
 
 	// Register the same route name for different methods
 	// This is a common RESTful pattern
-	mux.Get("users", "/users", func(ctx *HttpContext) error {
+	mux.Get("users", "/users", func(ctx Context) error {
 		return ctx.String(200, "GET users")
 	})
 
-	mux.Post("users", "/users", func(ctx *HttpContext) error {
+	mux.Post("users", "/users", func(ctx Context) error {
 		return ctx.String(201, "POST users")
 	})
 
-	mux.Put("user", "/users/{id}", func(ctx *HttpContext) error {
+	mux.Put("user", "/users/{id}", func(ctx Context) error {
 		return ctx.String(200, "PUT user")
 	})
 
-	mux.Delete("user", "/users/{id}", func(ctx *HttpContext) error {
+	mux.Delete("user", "/users/{id}", func(ctx Context) error {
 		return ctx.String(204, "DELETE user")
 	})
 
@@ -794,7 +794,7 @@ func TestMux_Reverse_Integration(t *testing.T) {
 	mux := NewMux()
 
 	// Set up a realistic RESTful API with named routes
-	mux.Get("users", "/users", func(ctx *HttpContext) error {
+	mux.Get("users", "/users", func(ctx Context) error {
 		// Generate URLs to other routes within handler
 		userProfileURL, _ := mux.Reverse("user", map[string]string{"id": "123"})
 		createUserURL, _ := mux.Reverse("users", nil)
@@ -806,11 +806,11 @@ func TestMux_Reverse_Integration(t *testing.T) {
 		})
 	})
 
-	mux.Post("users", "/users", func(ctx *HttpContext) error {
+	mux.Post("users", "/users", func(ctx Context) error {
 		return ctx.String(201, "User created")
 	})
 
-	mux.Get("user", "/users/{id}", func(ctx *HttpContext) error {
+	mux.Get("user", "/users/{id}", func(ctx Context) error {
 		id := ctx.Param("id")
 		editURL, _ := mux.Reverse("user", map[string]string{"id": id})
 		deleteURL, _ := mux.Reverse("user", map[string]string{"id": id})
@@ -822,11 +822,11 @@ func TestMux_Reverse_Integration(t *testing.T) {
 		})
 	})
 
-	mux.Put("user", "/users/{id}", func(ctx *HttpContext) error {
+	mux.Put("user", "/users/{id}", func(ctx Context) error {
 		return ctx.String(200, "User updated")
 	})
 
-	mux.Delete("user", "/users/{id}", func(ctx *HttpContext) error {
+	mux.Delete("user", "/users/{id}", func(ctx Context) error {
 		return ctx.String(204, "User deleted")
 	})
 
