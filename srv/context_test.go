@@ -13,6 +13,25 @@ import (
 )
 
 // ============================
+// Interface Implementation Tests
+// ============================
+
+// TestHttpContextImplementsContext verifies that HttpContext implements the Context interface
+func TestHttpContextImplementsContext(t *testing.T) {
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+	ctx := NewHttpContext(rec, req)
+
+	// This should compile without errors if HttpContext implements Context
+	var _ Context = ctx
+
+	// Additional runtime verification
+	if ctx == nil {
+		t.Fatal("Expected HttpContext instance to implement Context interface")
+	}
+}
+
+// ============================
 // HttpContext Tests
 // ============================
 
@@ -432,6 +451,6 @@ func BenchmarkHttpContext_JSON(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		rec := httptest.NewRecorder()
 		ctx := NewHttpContext(rec, req)
-		ctx.JSON(200, data)
+		_ = ctx.JSON(200, data)
 	}
 }

@@ -7,6 +7,33 @@ import (
 	"sync"
 )
 
+type Context interface {
+	Set(key string, value interface{})
+	Get(key string) interface{}
+	Request() *http.Request
+	ResponseWriter() http.ResponseWriter
+	IsTLS() bool
+	IsWebSocket() bool
+	Method() string
+	Path() string
+	Param(key string) string
+	Query() url.Values
+	QueryParam(key string) string
+	FormValue(key string) string
+	GetHeader(key string) string
+	GetHeaders() http.Header
+	Cookie(key string) (*http.Cookie, error)
+	Cookies() []*http.Cookie
+	SetHeader(key, value string)
+	AddHeader(key, value string)
+	SetCookie(cookie *http.Cookie)
+	JSON(code int, v interface{}) error
+	String(code int, text string) error
+	Redirect(code int, path string)
+	HTML(code int, html string) error
+	WriteHeader(code int)
+}
+
 // HttpContext provides a convenient wrapper around http.Request and http.ResponseWriter
 // with additional functionality for storing request-scoped values, handling common
 // HTTP operations, and providing helper methods for request/response processing.
