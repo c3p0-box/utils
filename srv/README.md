@@ -5,6 +5,7 @@ The `srv` package provides comprehensive HTTP server utilities for Go applicatio
 ## Features
 
 - **🛠️ HTTP Context**: Convenient request/response wrapper with value storage
+- **📦 Request Parsing**: Universal parsing of JSON, form data, and query parameters with struct tags
 - **🔀 Enhanced Router**: Extended ServeMux with RESTful HTTP method helpers
 - **🔄 URL Reversing**: Named routes with automatic URL generation and parameter substitution
 - **🔗 Middleware System**: Composable HTTP middleware with easy chaining
@@ -161,6 +162,291 @@ ctx.Redirect(302, "/login")
 
 // Custom status code
 ctx.WriteHeader(204)
+```
+
+### 📦 ParseRequest - Universal Request Parsing
+
+#### Overview
+`ParseRequest` provides unified parsing of HTTP request data, automatically handling both request body content (JSON, form data, multipart forms) and URL query parameters. It uses struct tags to map data to Go structs with proper type conversion and error handling.
+
+#### Function Signature
+```go
+func ParseRequest(r *http.Request, target interface{}) error
+```
+
+#### Supported Features
+
+**Content Types:**
+- `application/json` - JSON payload parsing
+- `application/x-www-form-urlencoded` - HTML form data
+- `multipart/form-data` - File uploads and form data
+- Query parameters (always parsed regardless of Content-Type)
+
+**Struct Tags:**
+- `json:"field_name"` - Maps JSON fields
+- `form:"field_name"` - Maps form data fields
+- `query:"field_name"` - Maps URL query parameters
+
+**Supported Types:**
+- `string`, `int`, `int8`, `int16`, `int32`, `int64`
+- `uint`, `uint8`, `uint16`, `uint32`, `uint64`
+- `float32`, `float64`, `bool`
+
+#### Basic Usage
+
+```go
+type UserRequest struct {
+    // JSON/Form body fields
+    Name     string  `json:"name" form:"name"`
+    Email    string  `json:"email" form:"email"`
+    Age      int     `json:"age" form:"age"`
+    Active   bool    `json:"active" form:"active"`
+    
+    // Query parameters
+    Page     int     `query:"page"`
+    Sort     string  `query:"sort"`
+    Limit    int     `query:"limit"`
+    Debug    bool    `query:"debug"`
+}
+
+// Handler function
+func createUser(ctx *srv.HttpContext) error {
+    var req UserRequest
+    if err := srv.ParseRequest(ctx.Request(), &req); err != nil {
+        return err  // Error handled automatically
+    }
+    
+    // Use both body data and query parameters
+    log.Printf("Creating user: %s (page=%d, sort=%s)", req.Name, req.Page, req.Sort)
+    
+    // Process the request...
+    return ctx.JSON(201, map[string]interface{}{
+        "user":  req.Name,
+        "debug": req.Debug,
+    })
+}
+```
+
+#### JSON Request with Query Parameters
+
+```go
+// POST /users?page=2&sort=name&debug=true
+// Content-Type: application/json
+// Body: {"name": "John", "email": "john@example.com", "age": 30}
+
+type CreateUserRequest struct {
+    // From JSON body
+    Name  string `json:"name"`
+    Email string `json:"email"`
+    Age   int    `json:"age"`
+    
+    // From query parameters
+    Page  int    `query:"page"`
+    Sort  string `query:"sort"`
+    Debug bool   `query:"debug"`
+}
+
+func handler(ctx *srv.HttpContext) error {
+    var req CreateUserRequest
+    if err := srv.ParseRequest(ctx.Request(), &req); err != nil {
+        return err
+    }
+    
+    // req.Name = "John" (from JSON)
+    // req.Page = 2 (from query)
+    // req.Debug = true (from query)
+    
+    return ctx.JSON(200, req)
+}
+```
+
+#### Form Data with Query Parameters
+
+```go
+// POST /users?page=1&sort=email
+// Content-Type: application/x-www-form-urlencoded
+// Body: name=Jane&email=jane@example.com&active=true
+
+type FormUserRequest struct {
+    // From form data
+    Name   string `form:"name"`
+    Email  string `form:"email"`
+    Active bool   `form:"active"`
+    
+    // From query parameters
+    Page   int    `query:"page"`
+    Sort   string `query:"sort"`
+}
+
+func handler(ctx *srv.HttpContext) error {
+    var req FormUserRequest
+    if err := srv.ParseRequest(ctx.Request(), &req); err != nil {
+        return err
+    }
+    
+    // req.Name = "Jane" (from form)
+    // req.Page = 1 (from query)
+    
+    return ctx.JSON(200, req)
+}
+```
+
+#### Multipart Form with File Upload
+
+```go
+type FileUploadRequest struct {
+    // From multipart form
+    Title       string `form:"title"`
+    Description string `form:"description"`
+    
+    // From query parameters
+    Folder string `query:"folder"`
+    Public bool   `query:"public"`
+}
+
+func uploadHandler(ctx *srv.HttpContext) error {
+    var req FileUploadRequest
+    if err := srv.ParseRequest(ctx.Request(), &req); err != nil {
+        return err
+    }
+    
+    // Handle file upload
+    file, header, err := ctx.Request().FormFile("file")
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    // Use form data and query parameters
+    log.Printf("Uploading %s to folder %s (public=%v)", 
+        header.Filename, req.Folder, req.Public)
+    
+    return ctx.JSON(200, map[string]string{
+        "title":    req.Title,
+        "filename": header.Filename,
+        "folder":   req.Folder,
+    })
+}
+```
+
+#### Advanced Tag Usage
+
+```go
+type AdvancedRequest struct {
+    // Custom field names
+    UserID    int    `query:"user_id"`
+    SearchTerm string `query:"q"`
+    
+    // Skip fields
+    Password string `json:"password" form:"password"`
+    Internal string `query:"-"`  // Never parsed from query
+    
+    // Fields without tags use lowercase field name
+    Page  int     // Uses "page" as query parameter name
+    Limit int     // Uses "limit" as query parameter name
+}
+```
+
+#### Query-Only Requests (GET)
+
+```go
+// GET /search?q=golang&page=2&limit=20&sort=date&active=true
+
+type SearchRequest struct {
+    Query  string `query:"q"`
+    Page   int    `query:"page"`
+    Limit  int    `query:"limit"`
+    Sort   string `query:"sort"`
+    Active bool   `query:"active"`
+}
+
+func searchHandler(ctx *srv.HttpContext) error {
+    var req SearchRequest
+    if err := srv.ParseRequest(ctx.Request(), &req); err != nil {
+        return err
+    }
+    
+    // All fields populated from query parameters
+    results := performSearch(req.Query, req.Page, req.Limit)
+    
+    return ctx.JSON(200, map[string]interface{}{
+        "results": results,
+        "query":   req.Query,
+        "page":    req.Page,
+    })
+}
+```
+
+#### Error Handling
+
+```go
+func handlerWithValidation(ctx *srv.HttpContext) error {
+    var req UserRequest
+    if err := srv.ParseRequest(ctx.Request(), &req); err != nil {
+        // Common errors:
+        // - Invalid JSON format
+        // - Type conversion errors (e.g., "abc" -> int)
+        // - Malformed Content-Type header
+        return err  // Returns 400 Bad Request with details
+    }
+    
+    // Additional validation
+    if req.Name == "" {
+        return erm.BadRequest("Name is required", nil)
+    }
+    if req.Age < 0 {
+        return erm.BadRequest("Age must be positive", nil)
+    }
+    
+    return ctx.JSON(200, req)
+}
+```
+
+#### Type Conversion Examples
+
+```go
+// URL: /api/users?page=5&active=true&score=95.5&tags=
+
+type TypeExampleRequest struct {
+    Page    int     `query:"page"`    // "5" -> 5
+    Active  bool    `query:"active"`  // "true" -> true
+    Score   float64 `query:"score"`   // "95.5" -> 95.5
+    Tags    string  `query:"tags"`    // "" -> "" (empty string)
+    Missing int     `query:"missing"` // (not provided) -> 0 (zero value)
+}
+```
+
+#### Best Practices
+
+1. **Combine Tags**: Use multiple tags for flexibility
+```go
+type FlexibleRequest struct {
+    Name string `json:"name" form:"name" query:"name"`
+}
+```
+
+2. **Validation**: Always validate parsed data
+```go
+if req.Page < 1 {
+    req.Page = 1  // Set default
+}
+```
+
+3. **Error Handling**: Return meaningful errors
+```go
+if err := srv.ParseRequest(ctx.Request(), &req); err != nil {
+    return erm.BadRequest("Invalid request format", err)
+}
+```
+
+4. **Documentation**: Document expected parameters
+```go
+// UserListRequest handles GET /users?page=N&sort=field&limit=N
+type UserListRequest struct {
+    Page  int    `query:"page"`  // Page number (default: 1)
+    Sort  string `query:"sort"`  // Sort field: "name", "email", "created"
+    Limit int    `query:"limit"` // Items per page (default: 20, max: 100)
+}
 ```
 
 ### 🔀 Mux - Enhanced HTTP Router
