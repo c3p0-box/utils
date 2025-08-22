@@ -171,7 +171,7 @@ ctx.WriteHeader(204)
 
 #### Function Signature
 ```go
-func ParseRequest(r *http.Request, target interface{}) error
+func ParseRequest(r *http.Request, target interface{}) erm.Error
 ```
 
 #### Supported Features

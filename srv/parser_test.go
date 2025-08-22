@@ -137,19 +137,19 @@ func TestParseRequest_QueryParams_InvalidTypes(t *testing.T) {
 			name:        "Invalid integer",
 			queryParams: "page=invalid",
 			wantErr:     true,
-			errMsg:      "parsing \"invalid\": invalid syntax",
+			errMsg:      "invalid request",
 		},
 		{
 			name:        "Invalid boolean",
 			queryParams: "active=maybe",
 			wantErr:     true,
-			errMsg:      "parsing \"maybe\": invalid syntax",
+			errMsg:      "invalid request",
 		},
 		{
 			name:        "Invalid float",
 			queryParams: "min_score=not_a_number",
 			wantErr:     true,
-			errMsg:      "parsing \"not_a_number\": invalid syntax",
+			errMsg:      "invalid request",
 		},
 	}
 
@@ -365,7 +365,7 @@ func TestParseRequest_ErrorCases(t *testing.T) {
 				return nil, &result
 			},
 			wantErr: true,
-			errMsg:  "Request is nil",
+			errMsg:  "invalid request",
 		},
 		{
 			name: "Non-pointer target",
@@ -375,7 +375,7 @@ func TestParseRequest_ErrorCases(t *testing.T) {
 				return req, result // Not a pointer
 			},
 			wantErr: true,
-			errMsg:  "Target must be a pointer to a struct",
+			errMsg:  "invalid request",
 		},
 		{
 			name: "Non-struct target",
@@ -385,7 +385,7 @@ func TestParseRequest_ErrorCases(t *testing.T) {
 				return req, &result // Pointer to non-struct
 			},
 			wantErr: true,
-			errMsg:  "Target must be a pointer to a struct",
+			errMsg:  "invalid request",
 		},
 		{
 			name: "Malformed Content-Type",
@@ -396,7 +396,7 @@ func TestParseRequest_ErrorCases(t *testing.T) {
 				return req, &result
 			},
 			wantErr: true,
-			errMsg:  "unexpected content after media subtype",
+			errMsg:  "invalid request",
 		},
 	}
 
@@ -510,7 +510,7 @@ func TestParseRequest_UnsupportedContentType(t *testing.T) {
 		t.Fatalf("Expected error for unsupported content type")
 	}
 
-	if !strings.Contains(err.Error(), "Unsupported Content-Type: text/plain") {
+	if !strings.Contains(err.Error(), "invalid request") {
 		t.Errorf("Error should mention unsupported content type, got: %v", err)
 	}
 }
@@ -538,7 +538,7 @@ func TestParseRequest_InvalidJSON(t *testing.T) {
 		t.Fatalf("Expected error for invalid JSON")
 	}
 
-	if !strings.Contains(err.Error(), "invalid character") {
+	if !strings.Contains(err.Error(), "invalid request") {
 		t.Errorf("Error should mention invalid character, got: %v", err)
 	}
 }

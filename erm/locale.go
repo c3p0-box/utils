@@ -117,8 +117,9 @@ const (
 	MsgDivisorZero = "validation.divisor_zero"
 
 	// Error message constants
-	MsgErrorMultiple = "error.multiple"
-	MsgErrorNotFound = "error.not_found"
+	MsgErrorMultiple       = "error.multiple"
+	MsgErrorNotFound       = "error.not_found"
+	MsgErrorInvalidRequest = "error.invalid_request"
 )
 
 // Global internationalization state
@@ -509,6 +510,10 @@ func initializeMessages() {
 		},
 		MsgErrorNotFound: {
 			Singular: "{{.field}} is not found",
+			Plural:   "",
+		},
+		MsgErrorInvalidRequest: {
+			Singular: "invalid request",
 			Plural:   "",
 		},
 	}

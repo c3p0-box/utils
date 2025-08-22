@@ -51,9 +51,9 @@ import (
 //	}
 //	// Use req.Name, req.Email, req.Age (from body)
 //	// Use req.Page, req.Sort, req.FilterBy (from query parameters)
-func ParseRequest(r *http.Request, target interface{}) error {
+func ParseRequest(r *http.Request, target interface{}) erm.Error {
 	if r == nil {
-		return erm.BadRequest("Request is nil", nil)
+		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 	}
 
 	// Parse query parameters first (always available regardless of Content-Type)
@@ -66,7 +66,7 @@ func ParseRequest(r *http.Request, target interface{}) error {
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err != nil && contentType != "" {
 		// If Content-Type header is malformed, treat as unsupported
-		return erm.BadRequest("Invalid Content-Type header", err)
+		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 	}
 
 	// Route to appropriate parser based on content type for body parsing
@@ -81,14 +81,14 @@ func ParseRequest(r *http.Request, target interface{}) error {
 		// No Content-Type specified, try to detect or default to JSON
 		return parseRequestWithDetection(r, target)
 	default:
-		return erm.BadRequest("Unsupported Content-Type: "+mediaType, nil)
+		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 	}
 }
 
 // parseJSONRequest handles JSON payload parsing
-func parseJSONRequest(r *http.Request, target interface{}) error {
+func parseJSONRequest(r *http.Request, target interface{}) erm.Error {
 	if r.Body == nil {
-		return erm.BadRequest("Request body is missing", nil)
+		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 	}
 
 	// Ensure body is closed to prevent resource leaks
@@ -118,33 +118,33 @@ func parseJSONRequest(r *http.Request, target interface{}) error {
 			slog.Any("error", err),
 		).Debug("failed to parse JSON request body")
 
-		return erm.BadRequest("Invalid JSON format", err)
+		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 	}
 
 	return nil
 }
 
 // parseFormRequest handles application/x-www-form-urlencoded parsing
-func parseFormRequest(r *http.Request, target interface{}) error {
+func parseFormRequest(r *http.Request, target interface{}) erm.Error {
 	if err := r.ParseForm(); err != nil {
-		return erm.BadRequest("Failed to parse form data", err)
+		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 	}
 
 	return mapFormToStruct(r.Form, target)
 }
 
 // parseMultipartFormRequest handles multipart/form-data parsing
-func parseMultipartFormRequest(r *http.Request, target interface{}) error {
+func parseMultipartFormRequest(r *http.Request, target interface{}) erm.Error {
 	// Set max memory for multipart parsing (32MB)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		return erm.BadRequest("Failed to parse multipart form data", err)
+		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 	}
 
 	return mapFormToStruct(r.MultipartForm.Value, target)
 }
 
 // parseRequestWithDetection attempts to detect content type when not specified
-func parseRequestWithDetection(r *http.Request, target interface{}) error {
+func parseRequestWithDetection(r *http.Request, target interface{}) erm.Error {
 	if r.Body == nil {
 		return nil // No body to parse - this is fine for GET requests
 	}
@@ -160,7 +160,7 @@ func parseRequestWithDetection(r *http.Request, target interface{}) error {
 }
 
 // parseQueryParams parses URL query parameters and maps them to struct fields with `query` tags
-func parseQueryParams(r *http.Request, target interface{}) error {
+func parseQueryParams(r *http.Request, target interface{}) erm.Error {
 	if r.URL == nil {
 		return nil // No query parameters to parse
 	}
@@ -174,10 +174,10 @@ func parseQueryParams(r *http.Request, target interface{}) error {
 }
 
 // mapQueryToStruct maps query parameters to struct fields using reflection and `query` struct tags
-func mapQueryToStruct(values map[string][]string, target interface{}) error {
+func mapQueryToStruct(values map[string][]string, target interface{}) erm.Error {
 	rv := reflect.ValueOf(target)
 	if rv.Kind() != reflect.Ptr || rv.Elem().Kind() != reflect.Struct {
-		return erm.BadRequest("Target must be a pointer to a struct", nil)
+		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 	}
 
 	rv = rv.Elem()
@@ -218,7 +218,7 @@ func mapQueryToStruct(values map[string][]string, target interface{}) error {
 				slog.Any("error", err),
 			).Debug("failed to set field value from query parameter")
 
-			return erm.BadRequest("Invalid query parameter value for "+queryTag, err)
+			return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 		}
 	}
 
@@ -226,10 +226,10 @@ func mapQueryToStruct(values map[string][]string, target interface{}) error {
 }
 
 // mapFormToStruct maps form values to struct fields using reflection and struct tags
-func mapFormToStruct(values map[string][]string, target interface{}) error {
+func mapFormToStruct(values map[string][]string, target interface{}) erm.Error {
 	rv := reflect.ValueOf(target)
 	if rv.Kind() != reflect.Ptr || rv.Elem().Kind() != reflect.Struct {
-		return erm.BadRequest("Target must be a pointer to a struct", nil)
+		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 	}
 
 	rv = rv.Elem()
@@ -270,7 +270,7 @@ func mapFormToStruct(values map[string][]string, target interface{}) error {
 				slog.Any("error", err),
 			).Debug("failed to set field value from form data")
 
-			return erm.BadRequest("Invalid form field value for "+formTag, err)
+			return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
 		}
 	}
 
@@ -319,7 +319,7 @@ func setFieldValue(field reflect.Value, value string) error {
 		}
 		field.SetBool(boolVal)
 	default:
-		return erm.BadRequest("Unsupported field type: "+field.Kind().String(), nil)
+		return erm.Internal("unsupported field type: "+field.Kind().String(), nil)
 	}
 
 	return nil
