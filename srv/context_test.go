@@ -196,7 +196,7 @@ func TestHttpContext_Parameters(t *testing.T) {
 		form.Add("password", "secret")
 
 		req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Content-Type", MIMEApplicationForm)
 		rec := httptest.NewRecorder()
 		ctx := NewHttpContext(rec, req)
 
@@ -236,12 +236,12 @@ func TestHttpContext_Headers(t *testing.T) {
 	}
 
 	// Test response headers
-	ctx.SetHeader("Content-Type", "application/json")
+	ctx.SetHeader("Content-Type", MIMEApplicationJSON)
 	ctx.AddHeader("X-Custom", "value1")
 	ctx.AddHeader("X-Custom", "value2")
 
-	if rec.Header().Get("Content-Type") != "application/json" {
-		t.Errorf("Expected Content-Type 'application/json', got '%s'", rec.Header().Get("Content-Type"))
+	if rec.Header().Get("Content-Type") != MIMEApplicationJSON {
+		t.Errorf("Expected Content-Type '%s', got '%s'", MIMEApplicationJSON, rec.Header().Get("Content-Type"))
 	}
 
 	customHeaders := rec.Header().Values("X-Custom")
@@ -315,8 +315,8 @@ func TestHttpContext_ResponseMethods(t *testing.T) {
 		}
 
 		contentType := rec.Header().Get("Content-Type")
-		if contentType != "application/json" {
-			t.Errorf("Expected Content-Type 'application/json', got '%s'", contentType)
+		if contentType != MIMEApplicationJSON {
+			t.Errorf("Expected Content-Type '%s', got '%s'", MIMEApplicationJSON, contentType)
 		}
 
 		var result map[string]interface{}
@@ -358,8 +358,8 @@ func TestHttpContext_ResponseMethods(t *testing.T) {
 		}
 
 		contentType := rec.Header().Get("Content-Type")
-		if contentType != "text/plain" {
-			t.Errorf("Expected Content-Type 'text/plain', got '%s'", contentType)
+		if contentType != MIMETextPlain {
+			t.Errorf("Expected Content-Type '%s', got '%s'", MIMETextPlain, contentType)
 		}
 
 		if rec.Body.String() != "Hello, World!" {
@@ -383,8 +383,8 @@ func TestHttpContext_ResponseMethods(t *testing.T) {
 		}
 
 		contentType := rec.Header().Get("Content-Type")
-		if contentType != "text/html" {
-			t.Errorf("Expected Content-Type 'text/html', got '%s'", contentType)
+		if contentType != MIMETextHTMLCharsetUTF8 {
+			t.Errorf("Expected Content-Type '%s', got '%s'", MIMETextHTML, contentType)
 		}
 
 		if rec.Body.String() != html {

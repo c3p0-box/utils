@@ -204,7 +204,7 @@ func (c *HttpContext) SetCookie(cookie *http.Cookie) {
 // The Content-Type header is automatically set to "application/json".
 // Returns an error if JSON encoding fails.
 func (c *HttpContext) JSON(code int, v interface{}) error {
-	c.SetHeader("Content-Type", "application/json")
+	c.SetHeader("Content-Type", MIMEApplicationJSON)
 	c.responseWriter.WriteHeader(code)
 	return json.NewEncoder(c.responseWriter).Encode(v)
 }
@@ -212,7 +212,7 @@ func (c *HttpContext) JSON(code int, v interface{}) error {
 // String writes a plain text response with the specified status code.
 // The Content-Type header is automatically set to "text/plain".
 func (c *HttpContext) String(code int, text string) error {
-	c.SetHeader("Content-Type", "text/plain")
+	c.SetHeader("Content-Type", MIMETextPlain)
 	c.responseWriter.WriteHeader(code)
 	_, err := c.responseWriter.Write([]byte(text))
 	return err
@@ -221,7 +221,7 @@ func (c *HttpContext) String(code int, text string) error {
 // HTML writes an HTML response with the specified status code.
 // The Content-Type header is automatically set to "text/html".
 func (c *HttpContext) HTML(code int, html string) error {
-	c.SetHeader("Content-Type", "text/html")
+	c.SetHeader("Content-Type", MIMETextHTMLCharsetUTF8)
 	c.responseWriter.WriteHeader(code)
 	_, err := c.responseWriter.Write([]byte(html))
 	return err
