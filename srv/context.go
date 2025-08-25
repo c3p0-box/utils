@@ -11,7 +11,7 @@ type Context interface {
 	Set(key string, value interface{})
 	Get(key string) interface{}
 	Request() *http.Request
-	ResponseWriter() http.ResponseWriter
+	Response() http.ResponseWriter
 	IsTLS() bool
 	IsWebSocket() bool
 	Method() string
@@ -93,8 +93,8 @@ func (c *HttpContext) Request() *http.Request {
 	return c.request
 }
 
-// ResponseWriter returns the underlying http.ResponseWriter object.
-func (c *HttpContext) ResponseWriter() http.ResponseWriter {
+// Response returns the underlying http.ResponseWriter object.
+func (c *HttpContext) Response() http.ResponseWriter {
 	return c.responseWriter
 }
 
@@ -104,23 +104,23 @@ func (c *HttpContext) ResponseWriter() http.ResponseWriter {
 
 // IsTLS returns true if the request was made over HTTPS/TLS.
 func (c *HttpContext) IsTLS() bool {
-	return c.request.TLS != nil
+	return c.Request().TLS != nil
 }
 
 // IsWebSocket returns true if this is a WebSocket upgrade request.
 // It checks for the "Upgrade: websocket" header.
 func (c *HttpContext) IsWebSocket() bool {
-	return c.request.Header.Get("Upgrade") == "websocket"
+	return c.Request().Header.Get("Upgrade") == "websocket"
 }
 
 // Method returns the HTTP method of the request (GET, POST, etc.).
 func (c *HttpContext) Method() string {
-	return c.request.Method
+	return c.Request().Method
 }
 
 // Path returns the URL path of the request.
 func (c *HttpContext) Path() string {
-	return c.request.URL.Path
+	return c.Request().URL.Path
 }
 
 // ============================
@@ -135,19 +135,19 @@ func (c *HttpContext) Query() url.Values {
 // QueryParam returns the value of the specified query parameter.
 // Returns empty string if the parameter doesn't exist.
 func (c *HttpContext) QueryParam(key string) string {
-	return c.query.Get(key)
+	return c.Query().Get(key)
 }
 
 // Param returns the value of the specified path parameter.
 // This uses Go 1.22+ ServeMux path value extraction.
 func (c *HttpContext) Param(key string) string {
-	return c.request.PathValue(key)
+	return c.Request().PathValue(key)
 }
 
 // FormValue returns the value of the specified form parameter.
 // It parses the form data if not already parsed.
 func (c *HttpContext) FormValue(key string) string {
-	return c.request.FormValue(key)
+	return c.Request().FormValue(key)
 }
 
 // ============================
@@ -156,24 +156,24 @@ func (c *HttpContext) FormValue(key string) string {
 
 // GetHeader returns the value of the specified request header.
 func (c *HttpContext) GetHeader(key string) string {
-	return c.request.Header.Get(key)
+	return c.Request().Header.Get(key)
 }
 
 // GetHeaders returns all request headers.
 func (c *HttpContext) GetHeaders() http.Header {
-	return c.request.Header
+	return c.Request().Header
 }
 
 // SetHeader sets a response header. If a header with the same key already
 // exists, it will be replaced.
 func (c *HttpContext) SetHeader(key, value string) {
-	c.responseWriter.Header().Set(key, value)
+	c.Response().Header().Set(key, value)
 }
 
 // AddHeader adds a response header. If a header with the same key already
 // exists, the value will be appended.
 func (c *HttpContext) AddHeader(key, value string) {
-	c.responseWriter.Header().Add(key, value)
+	c.Response().Header().Add(key, value)
 }
 
 // ============================
@@ -183,17 +183,17 @@ func (c *HttpContext) AddHeader(key, value string) {
 // Cookie returns the named cookie provided in the request.
 // Returns ErrNoCookie if no cookie with the given name is found.
 func (c *HttpContext) Cookie(key string) (*http.Cookie, error) {
-	return c.request.Cookie(key)
+	return c.Request().Cookie(key)
 }
 
 // Cookies returns all cookies provided in the request.
 func (c *HttpContext) Cookies() []*http.Cookie {
-	return c.request.Cookies()
+	return c.Request().Cookies()
 }
 
 // SetCookie adds a Set-Cookie header to the response.
 func (c *HttpContext) SetCookie(cookie *http.Cookie) {
-	http.SetCookie(c.responseWriter, cookie)
+	http.SetCookie(c.Response(), cookie)
 }
 
 // ============================
@@ -205,16 +205,16 @@ func (c *HttpContext) SetCookie(cookie *http.Cookie) {
 // Returns an error if JSON encoding fails.
 func (c *HttpContext) JSON(code int, v interface{}) error {
 	c.SetHeader("Content-Type", MIMEApplicationJSON)
-	c.responseWriter.WriteHeader(code)
-	return json.NewEncoder(c.responseWriter).Encode(v)
+	c.Response().WriteHeader(code)
+	return json.NewEncoder(c.Response()).Encode(v)
 }
 
 // String writes a plain text response with the specified status code.
 // The Content-Type header is automatically set to "text/plain".
 func (c *HttpContext) String(code int, text string) error {
 	c.SetHeader("Content-Type", MIMETextPlain)
-	c.responseWriter.WriteHeader(code)
-	_, err := c.responseWriter.Write([]byte(text))
+	c.Response().WriteHeader(code)
+	_, err := c.Response().Write([]byte(text))
 	return err
 }
 
@@ -222,8 +222,8 @@ func (c *HttpContext) String(code int, text string) error {
 // The Content-Type header is automatically set to "text/html".
 func (c *HttpContext) HTML(code int, html string) error {
 	c.SetHeader("Content-Type", MIMETextHTMLCharsetUTF8)
-	c.responseWriter.WriteHeader(code)
-	_, err := c.responseWriter.Write([]byte(html))
+	c.Response().WriteHeader(code)
+	_, err := c.Response().Write([]byte(html))
 	return err
 }
 
@@ -232,10 +232,10 @@ func (c *HttpContext) HTML(code int, html string) error {
 // 307 (temporary), and 308 (permanent redirect).
 func (c *HttpContext) Redirect(code int, url string) {
 	c.SetHeader("Location", url)
-	c.responseWriter.WriteHeader(code)
+	c.Response().WriteHeader(code)
 }
 
 // WriteHeader sends an HTTP response header with the provided status code.
 func (c *HttpContext) WriteHeader(code int) {
-	c.responseWriter.WriteHeader(code)
+	c.Response().WriteHeader(code)
 }

@@ -380,7 +380,7 @@ func SessionMiddleware(store Store, sessionName string) HandlerFuncMiddleware {
 			err = next(ctx)
 
 			// Save session after request (regardless of handler error)
-			if saveErr := session.Save(req, ctx.ResponseWriter()); saveErr != nil {
+			if saveErr := session.Save(req, ctx.Response()); saveErr != nil {
 				// Log save error but don't override handler error
 				slog.With(
 					slog.String("name", "srv.SessionMiddleware"),

@@ -47,7 +47,7 @@ func TestNewHttpContext(t *testing.T) {
 	if ctx.Request() != req {
 		t.Error("Expected context to store the request")
 	}
-	if ctx.ResponseWriter() != rec {
+	if ctx.Response() != rec {
 		t.Error("Expected context to store the response writer")
 	}
 	if ctx.values == nil {
