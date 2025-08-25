@@ -9,7 +9,8 @@ The `srv` package provides comprehensive HTTP server utilities for Go applicatio
 - **🔀 Enhanced Router**: Extended ServeMux with RESTful HTTP method helpers
 - **🔄 URL Reversing**: Named routes with automatic URL generation and parameter substitution
 - **🔗 Middleware System**: Composable HTTP middleware with easy chaining
-- **📊 Built-in Middleware**: Logging, panic recovery, CORS, and trailing slash middleware included
+- **📊 Built-in Middleware**: Logging, panic recovery, CORS, trailing slash, and session management included
+- **🍪 Session Stores**: In-memory and encrypted cookie-based session storage options
 - **🛑 Graceful Shutdown**: HTTP server with signal-based graceful shutdown
 - **📝 Structured Logging**: Integration with Go's structured logging (`log/slog`)
 - **🔗 ERM Integration**: Uses the erm package for standardized error handling and HTTP status codes
@@ -27,6 +28,7 @@ go get github.com/c3p0-box/utils/srv
 package main
 
 import (
+    "crypto/rand"
     "errors"
     "log"
     "github.com/c3p0-box/utils/srv"
@@ -37,8 +39,24 @@ func main() {
     // Create enhanced router with error handling
     mux := srv.NewMux()
     
+    // Add encrypted session middleware (for stateless apps)
+    key := make([]byte, 32) // AES-256 key
+    if _, err := rand.Read(key); err != nil {
+        log.Fatal(err)
+    }
+    store, err := srv.NewCookieStore("app-session", key, srv.NewOptions())
+    if err != nil {
+        log.Fatal(err)
+    }
+    mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+    
+    // Alternative: In-memory session store (for single-instance apps)
+    // store := srv.NewInMemoryStore("app-session", srv.NewOptions())
+    // defer store.Close()
+    // mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+    
     // Add named routes for URL generation
-    mux.Get("users", "/users", func(ctx *srv.HttpContext) error {
+    mux.Get("users", "/users", func(ctx srv.Context) error {
         // Generate URL to create user endpoint
         createURL, _ := mux.Reverse("users", nil)
         return ctx.JSON(200, map[string]interface{}{
@@ -47,7 +65,7 @@ func main() {
         })
     })
     
-    mux.Post("users", "/users", func(ctx *srv.HttpContext) error {
+    mux.Post("users", "/users", func(ctx srv.Context) error {
         name := ctx.FormValue("name")
         if name == "" {
             return errors.New("name is required")  // Error handled automatically
@@ -60,12 +78,12 @@ func main() {
         })
     })
     
-    mux.Get("user", "/users/{id}", func(ctx *srv.HttpContext) error {
+    mux.Get("user", "/users/{id}", func(ctx srv.Context) error {
         return ctx.JSON(200, map[string]string{"id": ctx.Param("id")})
     })
     
     // Set custom error handler with erm integration (optional)
-    mux.ErrorHandler(func(ctx *srv.HttpContext, err error) {
+    mux.ErrorHandler(func(ctx srv.Context, err error) {
         log.Printf("Handler error: %v", err)
         // erm errors provide proper HTTP status codes
         status := erm.Status(err)  // Extract HTTP status from erm error
@@ -73,11 +91,12 @@ func main() {
         ctx.JSON(status, map[string]string{"error": message})
     })
     
-    // Chain middleware (logging and recovery)
-    handler := srv.MiddlewareChain(srv.Logging, srv.Recover)(mux)
+    // Add middleware
+    mux.Middleware(srv.LoggingHandlerFunc)
+    mux.Middleware(srv.RecoverHandlerFunc)
     
     // Run server with graceful shutdown
-    err := srv.RunServer(handler, "localhost", "8080", func() error {
+    err := srv.RunServer(mux, "localhost", "8080", func() error {
         log.Println("Cleaning up...")
         return nil
     })
@@ -581,29 +600,26 @@ stdMux := mux.Mux()  // Get *http.ServeMux for advanced usage
 
 ### 🔗 Middleware System
 
-#### Types
-```go
-type Middleware func(next http.Handler) http.Handler
-```
+The srv package uses HandlerFunc-based middleware that works seamlessly with the Context interface and error handling system.
 
 #### Built-in Middleware
 
 **Logging Middleware**
 ```go
-handler := srv.Logging(mux)  // Logs all HTTP requests
+mux.Middleware(srv.LoggingHandlerFunc)  // Structured logging with slog
 ```
-Captures: method, path, status code, user agent, remote address
+Captures: method, path, user agent, remote address, and processing duration
 
 **Recovery Middleware**
 ```go
-handler := srv.Recover(mux)  // Recovers from panics
+mux.Middleware(srv.RecoverHandlerFunc)  // Panic recovery with error conversion
 ```
-Prevents server crashes by catching and logging panics
+Converts panics to errors that are handled by the error handler
 
 **CORS Middleware**
 ```go
 // Default CORS configuration (allows all origins)
-handler := srv.CORS(srv.DefaultCORSConfig)(mux)
+mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))
 
 // Custom CORS configuration
 corsConfig := srv.CORSConfig{
@@ -613,31 +629,203 @@ corsConfig := srv.CORSConfig{
     AllowCredentials: true,
     MaxAge:           3600,
 }
-handler := srv.CORS(corsConfig)(mux)
+mux.Middleware(srv.CORSHandlerFunc(corsConfig))
 ```
 Handles Cross-Origin Resource Sharing with configurable origins, methods, headers, and security options
 
 **Trailing Slash Middleware**
 ```go
 // Default configuration (internal forward)
-handler := srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig)(mux)
+mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig))
 
 // Redirect configuration
 redirectConfig := srv.TrailingSlashConfig{RedirectCode: 301}
-handler := srv.AddTrailingSlash(redirectConfig)(mux)
+mux.Middleware(srv.AddTrailingSlashHandlerFunc(redirectConfig))
 ```
 Adds trailing slashes to URLs for consistency and SEO. Can either redirect or forward internally
 
+**Session Middleware**
+```go
+// Create in-memory session store
+store := srv.NewInMemoryStore("app-session", srv.NewOptions())
+defer store.Close()  // Important: cleanup store on shutdown
+
+// Add session middleware
+mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+
+// Use sessions in handlers
+mux.Get("profile", "/profile", func(ctx srv.Context) error {
+    session := srv.SessionFromContext(ctx)
+    userID := session.Get("userID")
+    if userID == nil {
+        return ctx.Redirect(302, "/login")
+    }
+    return ctx.JSON(200, map[string]interface{}{"userID": userID})
+})
+
+mux.Post("login", "/login", func(ctx srv.Context) error {
+    session := srv.SessionFromContext(ctx)
+    session.Set("userID", 12345)
+    session.Set("username", "john_doe")
+    return ctx.JSON(200, map[string]string{"status": "logged in"})
+})
+```
+
+Session features include:
+- **Thread-safe in-memory storage** with automatic cleanup of expired sessions
+- **Configurable cookie options** (Path, Domain, MaxAge, Secure, HttpOnly, SameSite)
+- **Cryptographically secure session IDs** generated with crypto/rand
+- **Context integration** for easy session access in handlers
+- **Store interface** for custom session storage backends (Redis, database, etc.)
+
+Custom session configuration:
+```go
+// Custom session options
+options := &srv.Options{
+    Path:     "/api",                    // Cookie path
+    Domain:   "example.com",             // Cookie domain
+    MaxAge:   3600,                      // Session timeout (seconds)
+    Secure:   true,                      // HTTPS only
+    HttpOnly: true,                      // Prevent XSS
+    SameSite: http.SameSiteStrictMode,   // CSRF protection
+}
+store := srv.NewInMemoryStore("secure-session", options)
+
+// Use with middleware
+mux.Middleware(srv.SessionHandlerFunc(store, "secure-session"))
+
+// Custom store implementation (example)
+type RedisStore struct {
+    client *redis.Client
+    options *srv.Options
+}
+
+func (r *RedisStore) Get(req *http.Request, name string) (*srv.Session, error) {
+    // Custom Redis implementation
+}
+```
+
+**Cookie Store (Encrypted Client-Side Storage)**
+
+For stateless applications or when you want to avoid server-side session storage, use the CookieStore that encrypts all session data and stores it directly in cookies:
+
+```go
+// Generate a secure encryption key (32 bytes for AES-256)
+key := make([]byte, 32)
+if _, err := rand.Read(key); err != nil {
+    log.Fatal(err)
+}
+
+// Create encrypted cookie store
+store, err := srv.NewCookieStore("secure-session", key, &srv.Options{
+    Path:     "/",
+    MaxAge:   3600,                      // 1 hour session timeout
+    Secure:   true,                      // HTTPS only in production
+    HttpOnly: true,                      // Prevent XSS attacks
+    SameSite: http.SameSiteStrictMode,   // CSRF protection
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+// Use with session middleware (no defer Close() needed for cookie store)
+mux.Middleware(srv.SessionHandlerFunc(store, "secure-session"))
+
+// Session usage remains the same
+mux.Post("login", "/login", func(ctx srv.Context) error {
+    session := ctx.Get("session").(*srv.Session)
+    
+    // Authenticate user...
+    if validCredentials {
+        session.Set("userID", 12345)
+        session.Set("role", "admin")
+        session.Set("loginTime", time.Now())
+        return ctx.JSON(200, map[string]string{"status": "logged in"})
+    }
+    
+    return ctx.JSON(401, map[string]string{"error": "invalid credentials"})
+})
+```
+
+**CookieStore Features:**
+- **🔒 AES-GCM Encryption**: Authenticated encryption ensures data confidentiality and integrity
+- **🗃️ Client-side Storage**: No server-side session storage required (stateless)
+- **🔑 Configurable Keys**: Supports AES-128, AES-192, or AES-256 (16, 24, or 32-byte keys)
+- **📏 Size Monitoring**: Automatic validation of cookie size limits (~4KB)
+- **🧮 Gob Serialization**: Supports complex Go data types (maps, slices, structs)
+- **⚡ Thread-safe**: Safe for concurrent use across multiple requests
+
+**Security Considerations:**
+- Store encryption keys securely (use environment variables, key management systems)
+- Rotate encryption keys periodically
+- Use different keys for different environments (dev, staging, prod)
+- Set appropriate cookie security options (Secure, HttpOnly, SameSite)
+- Be mindful of session data size (cookie limit ~4KB)
+
+**Key Management Example:**
+```go
+// Production key management
+func getEncryptionKey() []byte {
+    keyStr := os.Getenv("SESSION_ENCRYPTION_KEY")
+    if keyStr == "" {
+        log.Fatal("SESSION_ENCRYPTION_KEY environment variable required")
+    }
+    
+    key, err := base64.StdEncoding.DecodeString(keyStr)
+    if err != nil {
+        log.Fatal("Invalid SESSION_ENCRYPTION_KEY format")
+    }
+    
+    if len(key) != 32 { // Require AES-256
+        log.Fatal("SESSION_ENCRYPTION_KEY must be 32 bytes for AES-256")
+    }
+    
+    return key
+}
+
+// Generate key for new deployment
+func generateKey() {
+    key := make([]byte, 32)
+    if _, err := rand.Read(key); err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("SESSION_ENCRYPTION_KEY=%s\n", base64.StdEncoding.EncodeToString(key))
+}
+```
+
+**Store Comparison:**
+
+| Feature | InMemoryStore | CookieStore |
+|---------|---------------|-------------|
+| **Storage Location** | Server memory | Client cookies |
+| **Scalability** | Single instance | Stateless/multi-instance |
+| **Data Size Limit** | Memory available | ~4KB per session |
+| **Persistence** | Lost on restart | Survives restarts |
+| **Security** | Server-side only | Encrypted client-side |
+| **Performance** | Fast lookup | Encryption overhead |
+| **Use Cases** | Single-server apps | Load-balanced/stateless apps |
+
+Session management provides:
+- **Automatic cookie handling** - Sessions are loaded and saved automatically
+- **Error resilience** - Failed session operations don't crash handlers
+- **Memory efficiency** - Expired sessions are automatically cleaned up
+- **Security** - Uses secure defaults and cryptographic session IDs
+
 #### Middleware Chaining
 ```go
-// Chain multiple middleware (applied in reverse order)
-handler := srv.MiddlewareChain(
-    srv.Logging,                                // Outermost: logs all requests
-    srv.Recover,                                // Recovers from panics
-    srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig), // URL normalization
-    srv.CORS(srv.DefaultCORSConfig),           // Built-in CORS middleware
-    RateLimiting,                               // Innermost: rate limiting
-)(mux)
+// Add multiple middleware (applied in order added - first added = outermost wrapper)
+mux.Middleware(srv.LoggingHandlerFunc)                                    // Outermost: logs all requests
+mux.Middleware(srv.RecoverHandlerFunc)                                    // Recovers from panics
+mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig)) // URL normalization
+mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))               // CORS headers
+mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))             // Session management
+// Add your custom middleware...
+mux.Middleware(func(next srv.HandlerFunc) srv.HandlerFunc {
+    return func(ctx srv.Context) error {
+        // Custom middleware logic here
+        return next(ctx)
+    }
+})
 ```
 
 ### 🛑 RunServer - Graceful Server
@@ -732,82 +920,112 @@ srv.RunServer(mux, "localhost", "8080", func() error {
 ### Advanced Middleware Integration
 
 ```go
-// Custom middleware
-func Authentication(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        ctx := srv.NewHttpContext(w, r)
-        
+// Create mux with comprehensive middleware stack
+mux := srv.NewMux()
+
+// Add session middleware first
+store := srv.NewInMemoryStore("app-session", srv.NewOptions())
+defer store.Close()
+mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+
+// Add HandlerFunc middleware (recommended)
+mux.Middleware(srv.LoggingHandlerFunc)    // Structured logging
+mux.Middleware(srv.RecoverHandlerFunc)    // Panic recovery
+
+// Add custom authentication middleware
+mux.Middleware(func(next srv.HandlerFunc) srv.HandlerFunc {
+    return func(ctx srv.Context) error {
         token := ctx.GetHeader("Authorization")
         if token == "" {
-            ctx.JSON(401, map[string]string{"error": "Unauthorized"})
-            return
+            return erm.Unauthorized("missing authorization", nil)
         }
         
         // Validate token and store user
-        user := validateToken(token)
+        user, err := validateToken(token)
+        if err != nil {
+            return erm.Unauthorized("invalid token", err)
+        }
         ctx.Set("user", user)
         
-        next.ServeHTTP(w, r)
-    })
-}
+        return next(ctx)
+    }
+})
 
-// Custom CORS configuration example
-corsConfig := srv.CORSConfig{
-    AllowOrigins:     []string{"https://example.com", "https://app.example.com"},
-    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
-    AllowHeaders:     []string{"Content-Type", "Authorization"},
+// Add CORS middleware
+mux.Middleware(srv.CORSHandlerFunc(srv.CORSConfig{
+    AllowOrigins:     []string{"https://example.com"},
     AllowCredentials: true,
-    MaxAge:           3600,
-}
-corsMiddleware := srv.CORS(corsConfig)
+    ExposeHeaders:    []string{"X-Total-Count"},
+}))
 
-// Chain all middleware
-mux := srv.NewMux()
-handler := srv.MiddlewareChain(
-    srv.Logging,                                // Log all requests
-    srv.Recover,                                // Panic recovery
-    srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig), // URL normalization
-    corsMiddleware,                             // CORS headers with custom config
-    Authentication,                             // JWT authentication
-)(mux)
+// Register routes (middleware automatically applied)
+mux.Get("users", "/users", listUsersHandler)
+mux.Post("users", "/users", createUserHandler)
+
+// All middleware is now configured and will be applied to all routes registered afterward
 ```
 
-### Enhanced HandlerFunc with Error Handling
+### Enhanced HandlerFunc with Middleware and Error Handling
 
 ```go
-// Register handler with automatic HttpContext and error handling
-mux.Post("/users", createUserHandler)
+// Create mux and add middleware
+mux := srv.NewMux()
 
-func createUserHandler(ctx *srv.HttpContext) error {
-    // Parse form data (HttpContext provided automatically)
-    name := ctx.FormValue("name")
-    email := ctx.FormValue("email")
-    
-    // Validate input - return error instead of manual response
-    if name == "" || email == "" {
-        return errors.New("name and email are required")
+// Add authentication middleware
+mux.Middleware(func(next srv.HandlerFunc) srv.HandlerFunc {
+    return func(ctx srv.Context) error {
+        token := ctx.GetHeader("Authorization")
+        if token == "" {
+            return erm.Unauthorized("missing authorization", nil)
+        }
+        // Store authenticated user in context
+        ctx.Set("user", getUserFromToken(token))
+        return next(ctx)
     }
-    
-    // Get authenticated user from context
-    authUser, ok := ctx.Get("user").(*User)
-    if !ok {
-        return errors.New("authentication required")
-    }
-    
-    // Create user
-    user := &User{
-        Name:      name,
-        Email:     email,
-        CreatedBy: authUser.ID,
-    }
-    
-    // Database operation with error handling
-    if err := saveUser(user); err != nil {
-        return fmt.Errorf("failed to create user: %w", err)
-    }
-    
-    // Return created user (errors handled automatically)
-    return ctx.JSON(201, user)
+})
+
+// Add logging middleware
+mux.Middleware(srv.LoggingHandlerFunc)
+
+// Register handler with automatic Context and error handling
+mux.Post("user-create", "/users", createUserHandler)
+
+func createUserHandler(ctx srv.Context) error {
+	// Parse form data (Context provided automatically)
+	name := ctx.FormValue("name")
+	email := ctx.FormValue("email")
+	
+	// Validate input - return error instead of manual response
+	if name == "" || email == "" {
+		return erm.BadRequest("name and email are required", nil)
+	}
+	
+	// Get authenticated user from middleware context
+	authUser, ok := ctx.Get("user").(*User)
+	if !ok {
+		return erm.Unauthorized("authentication required", nil)
+	}
+	
+	// Create user
+	user := &User{
+		Name:      name,
+		Email:     email,
+		CreatedBy: authUser.ID,
+	}
+	
+	// Database operation with error handling
+	if err := saveUser(user); err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+	
+	// Generate URL to view the created user
+	userURL, _ := mux.Reverse("user", map[string]string{"id": user.ID})
+	
+	// Return created user with links (errors handled automatically)
+	return ctx.JSON(201, map[string]interface{}{
+		"user": user,
+		"links": map[string]string{"self": userURL},
+	})
 }
 
 // Error handling patterns
@@ -965,14 +1183,12 @@ BenchmarkMux_RouteMatching         271.8 ns/op   224 B/op    5 allocs/op
 Place middleware in logical order - logging first, authentication/authorization before business logic:
 
 ```go
-handler := srv.MiddlewareChain(
-    srv.Logging,                                // First: log everything
-    srv.Recover,                                // Second: catch panics
-    srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig), // Third: URL normalization
-    srv.CORS(srv.DefaultCORSConfig),           // Fourth: CORS headers
-    Authentication,                             // Fifth: auth before business logic
-    RateLimiting,                               // Last: rate limiting
-)(mux)
+mux.Middleware(srv.LoggingHandlerFunc)                                    // First: log everything
+mux.Middleware(srv.RecoverHandlerFunc)                                    // Second: catch panics
+mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig)) // Third: URL normalization
+mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))               // Fourth: CORS headers
+mux.Middleware(AuthenticationMiddleware)                                  // Fifth: auth before business logic
+mux.Middleware(RateLimitingMiddleware)                                    // Last: rate limiting
 ```
 
 ### 2. Context Usage
@@ -998,12 +1214,8 @@ if err := ctx.JSON(200, data); err != nil {
 Configure CORS appropriately for your security requirements:
 
 ```go
-// Development - permissive CORS (or use DefaultCORSConfig)
-devCorsConfig := srv.CORSConfig{
-    AllowOrigins: []string{"*"},
-}
-corsMiddleware := srv.CORS(devCorsConfig)
-// Or simply: corsMiddleware := srv.CORS(srv.DefaultCORSConfig)
+// Development - permissive CORS
+mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))
 
 // Production - restrictive CORS
 prodCorsConfig := srv.CORSConfig{
@@ -1013,7 +1225,7 @@ prodCorsConfig := srv.CORSConfig{
     AllowCredentials: true,
     MaxAge:           3600,
 }
-corsMiddleware := srv.CORS(prodCorsConfig)
+mux.Middleware(srv.CORSHandlerFunc(prodCorsConfig))
 ```
 
 ### 5. Trailing Slash Configuration
@@ -1021,15 +1233,15 @@ Configure trailing slash behavior based on your needs:
 
 ```go
 // Default - internal forward (no redirect)
-trailingSlashMiddleware := srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig)
+mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig))
 
 // SEO-friendly permanent redirect
 seoConfig := srv.TrailingSlashConfig{RedirectCode: 301}
-trailingSlashMiddleware := srv.AddTrailingSlash(seoConfig)
+mux.Middleware(srv.AddTrailingSlashHandlerFunc(seoConfig))
 
 // Temporary redirect for testing
 testConfig := srv.TrailingSlashConfig{RedirectCode: 302}
-trailingSlashMiddleware := srv.AddTrailingSlash(testConfig)
+mux.Middleware(srv.AddTrailingSlashHandlerFunc(testConfig))
 ```
 
 ### 6. Resource Cleanup
@@ -1049,11 +1261,12 @@ For custom server configurations, use the individual components:
 
 ```go
 mux := srv.NewMux()
-handler := srv.MiddlewareChain(srv.Logging, srv.Recover)(mux)
+mux.Middleware(srv.LoggingHandlerFunc)
+mux.Middleware(srv.RecoverHandlerFunc)
 
 server := &http.Server{
     Addr:         ":8080",
-    Handler:      handler,
+    Handler:      mux,
     ReadTimeout:  15 * time.Second,
     WriteTimeout: 15 * time.Second,
     IdleTimeout:  60 * time.Second,

@@ -897,3 +897,293 @@ func TestMux_Reverse_Integration(t *testing.T) {
 		}
 	})
 }
+
+// ============================
+// Middleware Tests
+// ============================
+
+func TestMux_Middleware_Single(t *testing.T) {
+	mux := NewMux()
+
+	// Add middleware that sets a header
+	mux.Middleware(func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			ctx.SetHeader("X-Middleware", "test")
+			return next(ctx)
+		}
+	})
+
+	// Register a route after middleware
+	mux.Get("", "/test", func(ctx Context) error {
+		return ctx.String(200, "success")
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", rec.Code)
+	}
+
+	if rec.Header().Get("X-Middleware") != "test" {
+		t.Errorf("Expected X-Middleware header to be 'test', got '%s'", rec.Header().Get("X-Middleware"))
+	}
+
+	if rec.Body.String() != "success" {
+		t.Errorf("Expected body 'success', got '%s'", rec.Body.String())
+	}
+}
+
+func TestMux_Middleware_Multiple(t *testing.T) {
+	mux := NewMux()
+
+	// Track middleware execution order
+	var order []string
+
+	// Add first middleware
+	mux.Middleware(func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			order = append(order, "middleware1-before")
+			ctx.SetHeader("X-Middleware-1", "true")
+			err := next(ctx)
+			order = append(order, "middleware1-after")
+			return err
+		}
+	})
+
+	// Add second middleware
+	mux.Middleware(func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			order = append(order, "middleware2-before")
+			ctx.SetHeader("X-Middleware-2", "true")
+			err := next(ctx)
+			order = append(order, "middleware2-after")
+			return err
+		}
+	})
+
+	// Register a route after middleware
+	mux.Get("", "/test", func(ctx Context) error {
+		order = append(order, "handler")
+		return ctx.String(200, "success")
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	// Verify execution order (first added = outermost)
+	expectedOrder := []string{
+		"middleware1-before",
+		"middleware2-before",
+		"handler",
+		"middleware2-after",
+		"middleware1-after",
+	}
+
+	if len(order) != len(expectedOrder) {
+		t.Fatalf("Expected %d elements in order, got %d: %v", len(expectedOrder), len(order), order)
+	}
+
+	for i, exp := range expectedOrder {
+		if order[i] != exp {
+			t.Errorf("Expected order[%d] to be '%s', got '%s'", i, exp, order[i])
+		}
+	}
+
+	// Verify both middleware headers were set
+	if rec.Header().Get("X-Middleware-1") != "true" {
+		t.Errorf("Expected X-Middleware-1 header to be 'true', got '%s'", rec.Header().Get("X-Middleware-1"))
+	}
+
+	if rec.Header().Get("X-Middleware-2") != "true" {
+		t.Errorf("Expected X-Middleware-2 header to be 'true', got '%s'", rec.Header().Get("X-Middleware-2"))
+	}
+}
+
+func TestMux_Middleware_ErrorHandling(t *testing.T) {
+	mux := NewMux()
+
+	var capturedError error
+	mux.ErrorHandler(func(ctx Context, err error) {
+		capturedError = err
+		_ = ctx.String(400, "middleware error: "+err.Error())
+	})
+
+	// Add middleware that returns an error
+	mux.Middleware(func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			return errors.New("middleware error")
+		}
+	})
+
+	// Register a route (should not be reached)
+	mux.Get("", "/test", func(ctx Context) error {
+		t.Error("Handler should not be called when middleware returns error")
+		return ctx.String(200, "success")
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if capturedError == nil {
+		t.Error("Expected error to be captured")
+	} else if capturedError.Error() != "middleware error" {
+		t.Errorf("Expected error message 'middleware error', got '%s'", capturedError.Error())
+	}
+
+	if rec.Code != 400 {
+		t.Errorf("Expected status code 400, got %d", rec.Code)
+	}
+
+	expectedBody := "middleware error: middleware error"
+	if rec.Body.String() != expectedBody {
+		t.Errorf("Expected body '%s', got '%s'", expectedBody, rec.Body.String())
+	}
+}
+
+func TestMux_Middleware_ContextValues(t *testing.T) {
+	mux := NewMux()
+
+	// Add middleware that sets context values
+	mux.Middleware(func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			ctx.Set("user", "test-user")
+			ctx.Set("authenticated", true)
+			return next(ctx)
+		}
+	})
+
+	// Register a route that uses context values
+	mux.Get("", "/test", func(ctx Context) error {
+		user := ctx.Get("user")
+		authenticated := ctx.Get("authenticated")
+
+		if user != "test-user" {
+			t.Errorf("Expected user to be 'test-user', got '%v'", user)
+		}
+
+		if authenticated != true {
+			t.Errorf("Expected authenticated to be true, got '%v'", authenticated)
+		}
+
+		return ctx.JSON(200, map[string]interface{}{
+			"user":          user,
+			"authenticated": authenticated,
+		})
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", rec.Code)
+	}
+
+	// Parse JSON response
+	var response map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode JSON response: %v", err)
+	}
+
+	if response["user"] != "test-user" {
+		t.Errorf("Expected JSON user to be 'test-user', got '%v'", response["user"])
+	}
+
+	if response["authenticated"] != true {
+		t.Errorf("Expected JSON authenticated to be true, got '%v'", response["authenticated"])
+	}
+}
+
+func TestMux_Middleware_Integration(t *testing.T) {
+	mux := NewMux()
+
+	// Add authentication middleware
+	mux.Middleware(func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			token := ctx.GetHeader("Authorization")
+			if token == "" {
+				return errors.New("unauthorized: missing token")
+			}
+			ctx.Set("user", "authenticated-user")
+			return next(ctx)
+		}
+	})
+
+	// Add logging middleware
+	mux.Middleware(func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			ctx.SetHeader("X-Logged", "true")
+			return next(ctx)
+		}
+	})
+
+	// Set up error handler
+	var capturedError error
+	mux.ErrorHandler(func(ctx Context, err error) {
+		capturedError = err
+		_ = ctx.String(401, "Error: "+err.Error())
+	})
+
+	// Register route
+	mux.Get("", "/protected", func(ctx Context) error {
+		user := ctx.Get("user")
+		return ctx.JSON(200, map[string]interface{}{"user": user})
+	})
+
+	t.Run("request with authorization", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/protected", nil)
+		req.Header.Set("Authorization", "Bearer token123")
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != 200 {
+			t.Errorf("Expected status code 200, got %d", rec.Code)
+		}
+
+		if rec.Header().Get("X-Logged") != "true" {
+			t.Errorf("Expected X-Logged header to be set")
+		}
+
+		var response map[string]interface{}
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to decode JSON response: %v", err)
+		}
+
+		if response["user"] != "authenticated-user" {
+			t.Errorf("Expected user to be 'authenticated-user', got '%v'", response["user"])
+		}
+	})
+
+	t.Run("request without authorization", func(t *testing.T) {
+		capturedError = nil // Reset
+		req := httptest.NewRequest("GET", "/protected", nil)
+		// No Authorization header
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != 401 {
+			t.Errorf("Expected status code 401, got %d", rec.Code)
+		}
+
+		if capturedError == nil {
+			t.Error("Expected error to be captured")
+		} else if !strings.Contains(capturedError.Error(), "unauthorized") {
+			t.Errorf("Expected error to contain 'unauthorized', got '%s'", capturedError.Error())
+		}
+
+		expectedBody := "Error: unauthorized: missing token"
+		if rec.Body.String() != expectedBody {
+			t.Errorf("Expected body '%s', got '%s'", expectedBody, rec.Body.String())
+		}
+	})
+}

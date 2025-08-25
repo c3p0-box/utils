@@ -1,98 +1,186 @@
 package srv
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/gob"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
-// Middleware represents an HTTP middleware function that takes an http.Handler
-// and returns a new http.Handler, typically wrapping the original handler
-// with additional functionality.
-type Middleware func(next http.Handler) http.Handler
-
-// MiddlewareChain combines multiple middleware functions into a single middleware.
-// The middleware are applied in reverse order, so the first middleware in the list
-// will be the outermost wrapper.
-//
-// Example:
-//
-//	chain := MiddlewareChain(Logging, Recover)
-//	handler := chain(mux) // Results in: Logging(Recover(mux))
-func MiddlewareChain(m ...Middleware) Middleware {
-	return func(next http.Handler) http.Handler {
-		for i := len(m) - 1; i >= 0; i-- {
-			next = m[i](next)
-		}
-		return next
-	}
+// Register common types for gob encoding/decoding in cookie store
+func init() {
+	gob.Register(map[string]interface{}{})
+	gob.Register(map[string]int{})
+	gob.Register(map[string]string{})
+	gob.Register(map[int]interface{}{})
+	gob.Register(map[int]int{})
+	gob.Register(map[int]string{})
+	gob.Register([]string{})
+	gob.Register([]int{})
+	gob.Register([]interface{}{})
 }
 
-// MiddlewareWriter is a wrapper around http.ResponseWriter that captures
-// the HTTP status code for logging purposes. It implements http.ResponseWriter
-// and stores the status code when WriteHeader is called.
-type MiddlewareWriter struct {
-	http.ResponseWriter
-	StatusCode int
-}
+// =============================================================================
+// HandlerFunc-based Middleware for Context-Aware Operations
+// =============================================================================
 
-// WriteHeader captures the status code and calls the underlying ResponseWriter's WriteHeader.
-// If WriteHeader is not called explicitly, the status code defaults to http.StatusOK.
-func (w *MiddlewareWriter) WriteHeader(statusCode int) {
-	w.StatusCode = statusCode
-	w.ResponseWriter.WriteHeader(statusCode)
-}
-
-// Logging is a middleware that logs HTTP requests with structured logging using slog.
-// It captures the HTTP method, path, status code, user agent, and remote address.
-// The status code is captured using MiddlewareWriter.
+// LoggingHandlerFunc is a HandlerFunc-based middleware that logs HTTP requests
+// with structured logging using slog. It works directly with the Context interface
+// and maintains the elegant error handling pattern.
 //
 // The logged information includes:
-//   - name: "views.Logging" (logger identifier)
-//   - status: HTTP status code
+//   - name: "srv.Logging" (logger identifier)
 //   - method: HTTP method (GET, POST, etc.)
 //   - path: Request URL path
 //   - user-agent: Client user agent string
 //   - remote-addr: Client remote address
-func Logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mw := &MiddlewareWriter{w, http.StatusOK}
-		next.ServeHTTP(mw, r)
+//   - duration: Request processing time
+//
+// Note: This middleware cannot capture the exact status code since it works at the
+// HandlerFunc level, but it provides comprehensive logging of request information.
+//
+// Example:
+//
+//	mux.Middleware(srv.LoggingHandlerFunc)
+func LoggingHandlerFunc(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		start := time.Now()
+
+		// Execute the next handler
+		err := next(ctx)
+
+		// Log the request
+		duration := time.Since(start)
+		req := ctx.Request()
 		slog.With(
-			slog.String("name", "views.Logging"),
-			slog.Int("status", mw.StatusCode),
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.String("user-agent", r.UserAgent()),
-			slog.String("remote-addr", r.RemoteAddr),
+			slog.String("name", "srv.Logging"),
+			slog.String("method", req.Method),
+			slog.String("path", req.URL.Path),
+			slog.String("user-agent", req.UserAgent()),
+			slog.String("remote-addr", req.RemoteAddr),
+			slog.Duration("duration", duration),
 		).Info("request completed")
-	})
+
+		return err
+	}
 }
 
-// Recover is a middleware that recovers from panics during HTTP request processing.
-// When a panic occurs, it logs the error using structured logging and allows the
-// request to complete gracefully instead of crashing the server.
+// RecoverHandlerFunc is a HandlerFunc-based middleware that recovers from panics
+// during HTTP request processing. It works directly with the Context interface
+// and maintains the elegant error handling pattern.
+//
+// When a panic occurs, it logs the error using structured logging and converts
+// the panic to an error that can be handled by the error handler.
 //
 // The panic is logged with:
-//   - name: "views.Recover" (logger identifier)
+//   - name: "srv.Recover" (logger identifier)
 //   - error: The recovered panic value
+//   - path: Request URL path
+//   - method: HTTP method
 //
-// After logging, the middleware allows the panic to continue, which will typically
-// result in a 500 Internal Server Error response.
-func Recover(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// Example:
+//
+//	mux.Middleware(srv.RecoverHandlerFunc)
+func RecoverHandlerFunc(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) (err error) {
 		defer func() {
-			if err := recover(); err != nil {
+			if r := recover(); r != nil {
 				slog.With(
-					slog.String("name", "views.Recover"),
-					slog.Any("error", err),
+					slog.String("name", "srv.Recover"),
+					slog.Any("error", r),
+					slog.String("path", ctx.Request().URL.Path),
+					slog.String("method", ctx.Request().Method),
 				).Error("recovered from panic")
+
+				// Convert panic to error
+				if e, ok := r.(error); ok {
+					err = e
+				} else {
+					err = fmt.Errorf("panic: %v", r)
+				}
 			}
 		}()
-		next.ServeHTTP(w, r)
-	})
+
+		return next(ctx)
+	}
+}
+
+// CORSHandlerFunc returns a HandlerFunc-based CORS middleware with the provided configuration.
+// It works directly with the Context interface and maintains the elegant error handling pattern.
+//
+// Note: For proper CORS support with preflight requests, consider using the http.Handler
+// version CORS() middleware instead, as HandlerFunc middleware cannot fully handle
+// OPTIONS requests that don't match registered routes.
+//
+// Example usage:
+//
+//	// Use default configuration (allows all origins)
+//	mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))
+func CORSHandlerFunc(config CORSConfig) HandlerFuncMiddleware {
+	// Apply defaults if not set
+	if len(config.AllowOrigins) == 0 {
+		config.AllowOrigins = DefaultCORSConfig.AllowOrigins
+	}
+
+	// Pre-compute header values
+	exposeHeaders := strings.Join(config.ExposeHeaders, ", ")
+
+	return func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			req := ctx.Request()
+			origin := req.Header.Get("Origin")
+
+			// Always add Vary header for Origin
+			ctx.AddHeader("Vary", "Origin")
+
+			// If no origin, this is likely not a CORS request
+			if origin == "" {
+				return next(ctx)
+			}
+
+			// Simple origin check (for HandlerFunc version)
+			allowOrigin := ""
+			for _, o := range config.AllowOrigins {
+				if o == "*" {
+					if !config.AllowCredentials {
+						allowOrigin = "*"
+						break
+					}
+					// If credentials are allowed, echo specific origin
+					allowOrigin = origin
+					break
+				}
+				if o == origin {
+					allowOrigin = origin
+					break
+				}
+			}
+
+			// Set CORS headers if origin is allowed
+			if allowOrigin != "" {
+				ctx.SetHeader("Access-Control-Allow-Origin", allowOrigin)
+
+				if config.AllowCredentials {
+					ctx.SetHeader("Access-Control-Allow-Credentials", "true")
+				}
+
+				if exposeHeaders != "" {
+					ctx.SetHeader("Access-Control-Expose-Headers", exposeHeaders)
+				}
+			}
+
+			return next(ctx)
+		}
+	}
 }
 
 // =============================================================================
@@ -165,163 +253,6 @@ var DefaultCORSConfig = CORSConfig{
 	MaxAge:           0,
 }
 
-// CORS returns a Cross-Origin Resource Sharing (CORS) middleware with the provided configuration.
-//
-// Security: Poorly configured CORS can compromise security because it allows
-// relaxation of the browser's Same-Origin policy. Use caution when configuring
-// origins and credentials.
-//
-// Example usage:
-//
-//	// Use default configuration (allows all origins)
-//	corsMiddleware := srv.CORS(srv.DefaultCORSConfig)
-//
-//	// Use custom configuration
-//	corsConfig := srv.CORSConfig{
-//		AllowOrigins:     []string{"https://example.com", "https://app.example.com"},
-//		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
-//		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-//		AllowCredentials: true,
-//		MaxAge:           3600,
-//	}
-//	corsMiddleware := srv.CORS(corsConfig)
-//	handler := srv.MiddlewareChain(corsMiddleware)(mux)
-func CORS(config CORSConfig) Middleware {
-	// Apply defaults if not set
-	if len(config.AllowOrigins) == 0 {
-		config.AllowOrigins = DefaultCORSConfig.AllowOrigins
-	}
-	if len(config.AllowMethods) == 0 {
-		config.AllowMethods = DefaultCORSConfig.AllowMethods
-	}
-
-	// Compile origin patterns for wildcard support
-	allowOriginPatterns := make([]*regexp.Regexp, 0, len(config.AllowOrigins))
-	for _, origin := range config.AllowOrigins {
-		if origin == "*" {
-			continue // "*" is handled separately
-		}
-		// Convert wildcard patterns to regex
-		pattern := regexp.QuoteMeta(origin)
-		pattern = strings.ReplaceAll(pattern, "\\*", ".*")
-		pattern = strings.ReplaceAll(pattern, "\\?", ".")
-		pattern = "^" + pattern + "$"
-		if re, err := regexp.Compile(pattern); err == nil {
-			allowOriginPatterns = append(allowOriginPatterns, re)
-		}
-	}
-
-	// Pre-compute header values
-	allowMethods := strings.Join(config.AllowMethods, ", ")
-	allowHeaders := strings.Join(config.AllowHeaders, ", ")
-	exposeHeaders := strings.Join(config.ExposeHeaders, ", ")
-	maxAge := ""
-	if config.MaxAge > 0 {
-		maxAge = strconv.Itoa(config.MaxAge)
-	}
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-
-			// Always add Vary header for Origin
-			w.Header().Add("Vary", "Origin")
-
-			// Handle preflight requests (OPTIONS method with CORS headers)
-			isPreflight := r.Method == http.MethodOptions &&
-				r.Header.Get("Access-Control-Request-Method") != ""
-
-			// If no origin, this is likely not a CORS request
-			if origin == "" {
-				if !isPreflight {
-					next.ServeHTTP(w, r)
-					return
-				}
-				// For preflight without origin, return 204
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-
-			// Check if origin is allowed
-			allowOrigin := ""
-
-			// Check exact matches and wildcard
-			for _, o := range config.AllowOrigins {
-				if o == "*" {
-					if !config.AllowCredentials {
-						allowOrigin = "*"
-						break
-					}
-					// If credentials are allowed, we need to echo the specific origin
-					allowOrigin = origin
-					break
-				}
-				if o == origin {
-					allowOrigin = origin
-					break
-				}
-			}
-
-			// Check pattern matches if no exact match found
-			if allowOrigin == "" {
-				for _, pattern := range allowOriginPatterns {
-					if pattern.MatchString(origin) {
-						allowOrigin = origin
-						break
-					}
-				}
-			}
-
-			// Origin not allowed
-			if allowOrigin == "" {
-				if !isPreflight {
-					next.ServeHTTP(w, r)
-					return
-				}
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-
-			// Set CORS headers
-			w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
-
-			if config.AllowCredentials {
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
-			}
-
-			// Handle simple requests
-			if !isPreflight {
-				if exposeHeaders != "" {
-					w.Header().Set("Access-Control-Expose-Headers", exposeHeaders)
-				}
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Handle preflight requests
-			w.Header().Add("Vary", "Access-Control-Request-Method")
-			w.Header().Add("Vary", "Access-Control-Request-Headers")
-
-			w.Header().Set("Access-Control-Allow-Methods", allowMethods)
-
-			if allowHeaders != "" {
-				w.Header().Set("Access-Control-Allow-Headers", allowHeaders)
-			} else {
-				// Echo the requested headers if no specific headers configured
-				if requestedHeaders := r.Header.Get("Access-Control-Request-Headers"); requestedHeaders != "" {
-					w.Header().Set("Access-Control-Allow-Headers", requestedHeaders)
-				}
-			}
-
-			if maxAge != "" {
-				w.Header().Set("Access-Control-Max-Age", maxAge)
-			}
-
-			w.WriteHeader(http.StatusNoContent)
-		})
-	}
-}
-
 // =============================================================================
 // Trailing Slash Middleware
 // =============================================================================
@@ -341,9 +272,9 @@ var DefaultTrailingSlashConfig = TrailingSlashConfig{
 	RedirectCode: 0, // Forward internally by default
 }
 
-// AddTrailingSlash returns a middleware that adds a trailing slash to request URLs
-// that don't already have one. This middleware helps normalize URLs and can be useful
-// for SEO and consistent routing.
+// AddTrailingSlashHandlerFunc returns a HandlerFunc-based middleware that adds a trailing
+// slash to request URLs that don't already have one. It works directly with the Context
+// interface and maintains the elegant error handling pattern.
 //
 // The middleware can either redirect the client to the URL with trailing slash
 // (when RedirectCode is set) or forward the request internally (when RedirectCode is 0).
@@ -354,27 +285,20 @@ var DefaultTrailingSlashConfig = TrailingSlashConfig{
 // Example usage:
 //
 //	// Default behavior (internal forward)
-//	trailingSlashMiddleware := srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig)
+//	mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig))
 //
 //	// Redirect with 301 status code
 //	config := srv.TrailingSlashConfig{RedirectCode: 301}
-//	trailingSlashMiddleware := srv.AddTrailingSlash(config)
-//
-//	// Chain with other middleware
-//	handler := srv.MiddlewareChain(
-//		srv.Logging,
-//		srv.AddTrailingSlash(srv.DefaultTrailingSlashConfig),
-//		srv.CORS(srv.DefaultCORSConfig),
-//	)(mux)
-func AddTrailingSlash(config TrailingSlashConfig) Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			path := r.URL.Path
+//	mux.Middleware(srv.AddTrailingSlashHandlerFunc(config))
+func AddTrailingSlashHandlerFunc(config TrailingSlashConfig) HandlerFuncMiddleware {
+	return func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			req := ctx.Request()
+			path := req.URL.Path
 
 			// Skip if path already has trailing slash or is root
 			if strings.HasSuffix(path, "/") {
-				next.ServeHTTP(w, r)
-				return
+				return next(ctx)
 			}
 
 			// Add trailing slash
@@ -382,8 +306,8 @@ func AddTrailingSlash(config TrailingSlashConfig) Middleware {
 
 			// Build new URI with query string if present
 			uri := newPath
-			if r.URL.RawQuery != "" {
-				uri += "?" + r.URL.RawQuery
+			if req.URL.RawQuery != "" {
+				uri += "?" + req.URL.RawQuery
 			}
 
 			// Sanitize URI to prevent open redirect attacks
@@ -392,16 +316,80 @@ func AddTrailingSlash(config TrailingSlashConfig) Middleware {
 			// Handle redirect vs forward
 			if config.RedirectCode != 0 {
 				// Perform HTTP redirect
-				http.Redirect(w, r, uri, config.RedirectCode)
-				return
+				ctx.Redirect(config.RedirectCode, uri)
+				return nil
 			}
 
 			// Forward internally by modifying the request
-			r.URL.Path = newPath
-			r.RequestURI = uri
+			req.URL.Path = newPath
+			req.RequestURI = uri
 
-			next.ServeHTTP(w, r)
-		})
+			return next(ctx)
+		}
+	}
+}
+
+// =============================================================================
+// Session Middleware
+// =============================================================================
+
+// SessionHandlerFunc returns a HandlerFunc-based session middleware that automatically
+// manages sessions for each request. It loads existing sessions from the store or
+// creates new ones as needed, makes the session available through the Context,
+// and automatically saves the session after the request completes.
+//
+// The middleware integrates seamlessly with the srv package's Context interface,
+// allowing easy session access via ctx.Get("session") or helper methods.
+//
+// Example usage:
+//
+//	// Create session store
+//	store := srv.NewInMemoryStore("myapp-session", srv.NewOptions())
+//
+//	// Add session middleware
+//	mux.Middleware(srv.SessionHandlerFunc(store, "myapp-session"))
+//
+//	// Use in handlers
+//	mux.Get("profile", "/profile", func(ctx srv.Context) error {
+//		session := ctx.Get("session").(*srv.Session)
+//		userID := session.Get("userID")
+//		if userID == nil {
+//			return ctx.Redirect(302, "/login")
+//		}
+//		return ctx.JSON(200, map[string]interface{}{"userID": userID})
+//	})
+func SessionHandlerFunc(store Store, sessionName string) HandlerFuncMiddleware {
+	return func(next HandlerFunc) HandlerFunc {
+		return func(ctx Context) error {
+			req := ctx.Request()
+
+			// Try to get existing session
+			session, err := store.Get(req, sessionName)
+			if err != nil {
+				// Create new session if not found
+				session, err = store.New(req, sessionName)
+				if err != nil {
+					return fmt.Errorf("failed to create session: %w", err)
+				}
+			}
+
+			// Store session in context for handler access
+			ctx.Set("session", session)
+
+			// Execute the handler
+			err = next(ctx)
+
+			// Save session after request (regardless of handler error)
+			if saveErr := session.Save(req, ctx.ResponseWriter()); saveErr != nil {
+				// Log save error but don't override handler error
+				slog.With(
+					slog.String("name", "srv.SessionHandlerFunc"),
+					slog.String("error", saveErr.Error()),
+				).Error("failed to save session")
+			}
+
+			return err
+		}
 	}
 }
 
@@ -415,4 +403,496 @@ func sanitizeURI(uri string) string {
 		uri = "/" + strings.TrimLeft(uri, `/\`)
 	}
 	return uri
+}
+
+// =============================================================================
+// Session Management
+// =============================================================================
+
+// Options holds configuration for session cookies.
+type Options struct {
+	// Path sets the cookie path. Defaults to "/".
+	Path string
+	// Domain sets the cookie domain.
+	Domain string
+	// MaxAge sets the maximum age for the session in seconds.
+	// If <= 0, the session cookie will be deleted when the browser closes.
+	MaxAge int
+	// Secure indicates whether the cookie should only be sent over HTTPS.
+	Secure bool
+	// HttpOnly indicates whether the cookie should be accessible only through HTTP requests.
+	// This prevents access via JavaScript, mitigating XSS attacks.
+	HttpOnly bool
+	// SameSite controls when cookies are sent with cross-site requests.
+	SameSite http.SameSite
+}
+
+// NewOptions returns Options with secure defaults.
+func NewOptions() *Options {
+	return &Options{
+		Path:     "/",
+		MaxAge:   86400,                   // 24 hours
+		Secure:   true,                    // Always secure in production
+		HttpOnly: true,                    // Prevent XSS
+		SameSite: http.SameSiteStrictMode, // CSRF protection
+	}
+}
+
+// Session represents a user session with associated data and configuration.
+// It provides a secure way to maintain state across HTTP requests.
+type Session struct {
+	// The ID of the session, generated by stores. It should not be used for
+	// user data.
+	ID string
+	// Values contains the user-data for the session.
+	Values  map[interface{}]interface{}
+	Options *Options
+	IsNew   bool
+	store   Store
+	name    string
+}
+
+// Get retrieves a value from the session by key.
+func (s *Session) Get(key interface{}) interface{} {
+	if s.Values == nil {
+		return nil
+	}
+	return s.Values[key]
+}
+
+// Set stores a value in the session with the given key.
+func (s *Session) Set(key, value interface{}) {
+	if s.Values == nil {
+		s.Values = make(map[interface{}]interface{})
+	}
+	s.Values[key] = value
+}
+
+// Delete removes a key from the session.
+func (s *Session) Delete(key interface{}) {
+	if s.Values == nil {
+		return
+	}
+	delete(s.Values, key)
+}
+
+// Clear removes all values from the session.
+func (s *Session) Clear() {
+	s.Values = make(map[interface{}]interface{})
+}
+
+// Save persists the session to the underlying store.
+func (s *Session) Save(r *http.Request, w http.ResponseWriter) error {
+	if s.store == nil {
+		return fmt.Errorf("no store configured for session")
+	}
+	return s.store.Save(r, w, s)
+}
+
+// Store defines the interface for session storage backends.
+// Implementations must be thread-safe.
+type Store interface {
+	// Get should return a cached session.
+	Get(r *http.Request, name string) (*Session, error)
+
+	// New should create and return a new session.
+	//
+	// Note that New should never return a nil session, even in the case of
+	// an error if using the Registry infrastructure to cache the session.
+	New(r *http.Request, name string) (*Session, error)
+
+	// Save should persist session to the underlying store implementation.
+	Save(r *http.Request, w http.ResponseWriter, s *Session) error
+}
+
+// =============================================================================
+// In-Memory Session Store Implementation
+// =============================================================================
+
+// sessionData holds session information with expiration.
+type sessionData struct {
+	Values    map[interface{}]interface{}
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
+// InMemoryStore provides an in-memory session store implementation.
+// It is thread-safe and suitable for development and single-instance deployments.
+// For production with multiple instances, consider a distributed store.
+type InMemoryStore struct {
+	mu       sync.RWMutex
+	sessions map[string]*sessionData
+	options  *Options
+	name     string
+	cleanup  *time.Ticker
+}
+
+// NewInMemoryStore creates a new in-memory session store with the specified options.
+// It automatically starts a cleanup routine to remove expired sessions.
+func NewInMemoryStore(name string, options *Options) *InMemoryStore {
+	if options == nil {
+		options = NewOptions()
+	}
+
+	store := &InMemoryStore{
+		sessions: make(map[string]*sessionData),
+		options:  options,
+		name:     name,
+		cleanup:  time.NewTicker(time.Hour), // Cleanup expired sessions every hour
+	}
+
+	// Start cleanup routine
+	go store.cleanupExpiredSessions()
+
+	return store
+}
+
+// Get retrieves an existing session or returns nil if not found or expired.
+func (s *InMemoryStore) Get(r *http.Request, name string) (*Session, error) {
+	cookie, err := r.Cookie(name)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	data, exists := s.sessions[cookie.Value]
+	s.mu.RUnlock()
+
+	if !exists || time.Now().After(data.ExpiresAt) {
+		return nil, http.ErrNoCookie
+	}
+
+	session := &Session{
+		ID:      cookie.Value,
+		Values:  data.Values,
+		Options: s.options,
+		IsNew:   false,
+		store:   s,
+		name:    name,
+	}
+
+	return session, nil
+}
+
+// New creates a new session with a unique ID.
+func (s *InMemoryStore) New(_ *http.Request, name string) (*Session, error) {
+	sessionID, err := generateSessionID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate session ID: %w", err)
+	}
+
+	session := &Session{
+		ID:      sessionID,
+		Values:  make(map[interface{}]interface{}),
+		Options: s.options,
+		IsNew:   true,
+		store:   s,
+		name:    name,
+	}
+
+	return session, nil
+}
+
+// Save persists the session to the in-memory store and sets the session cookie.
+func (s *InMemoryStore) Save(_ *http.Request, w http.ResponseWriter, session *Session) error {
+	if session.ID == "" {
+		return fmt.Errorf("session ID is empty")
+	}
+
+	// Calculate expiration time
+	now := time.Now()
+	var expiresAt time.Time
+	if session.Options.MaxAge > 0 {
+		expiresAt = now.Add(time.Duration(session.Options.MaxAge) * time.Second)
+	} else {
+		// Session cookie (expires when browser closes)
+		expiresAt = now.Add(24 * time.Hour) // Default to 24 hours for cleanup
+	}
+
+	// Store session data
+	s.mu.Lock()
+	s.sessions[session.ID] = &sessionData{
+		Values:    session.Values,
+		CreatedAt: now,
+		ExpiresAt: expiresAt,
+	}
+	s.mu.Unlock()
+
+	// Set cookie
+	cookie := &http.Cookie{
+		Name:     session.name,
+		Value:    session.ID,
+		Path:     session.Options.Path,
+		Domain:   session.Options.Domain,
+		Secure:   session.Options.Secure,
+		HttpOnly: session.Options.HttpOnly,
+		SameSite: session.Options.SameSite,
+	}
+
+	if session.Options.MaxAge > 0 {
+		cookie.MaxAge = session.Options.MaxAge
+		cookie.Expires = expiresAt
+	}
+
+	http.SetCookie(w, cookie)
+	return nil
+}
+
+// Close stops the cleanup routine and clears all sessions.
+// This should be called when the store is no longer needed.
+func (s *InMemoryStore) Close() {
+	if s.cleanup != nil {
+		s.cleanup.Stop()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions = make(map[string]*sessionData)
+}
+
+// cleanupExpiredSessions removes expired sessions from the store.
+func (s *InMemoryStore) cleanupExpiredSessions() {
+	for range s.cleanup.C {
+		now := time.Now()
+		s.mu.Lock()
+		for id, data := range s.sessions {
+			if now.After(data.ExpiresAt) {
+				delete(s.sessions, id)
+			}
+		}
+		s.mu.Unlock()
+	}
+}
+
+// generateSessionID creates a cryptographically secure session ID.
+func generateSessionID() (string, error) {
+	b := make([]byte, 32) // 256 bits
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+// =============================================================================
+// Cookie Store Implementation with Encryption
+// =============================================================================
+
+// CookieStore provides an encrypted cookie-based session store implementation.
+// It stores all session data directly in encrypted cookies on the client side,
+// eliminating the need for server-side session storage.
+//
+// The store uses AES-GCM encryption for authenticated encryption, ensuring both
+// confidentiality and integrity of session data. Session values are serialized
+// using gob encoding before encryption.
+//
+// This implementation is suitable for stateless applications or when you want
+// to avoid server-side session storage. However, be aware of cookie size limits
+// (typically ~4KB) and ensure your session data fits within these constraints.
+type CookieStore struct {
+	cipher  cipher.AEAD
+	options *Options
+	name    string
+}
+
+// NewCookieStore creates a new cookie-based session store with the specified
+// encryption key and options. The encryption key must be 16, 24, or 32 bytes
+// to select AES-128, AES-192, or AES-256 respectively.
+//
+// The store uses AES-GCM for authenticated encryption, providing both
+// confidentiality and integrity protection for session data.
+//
+// Example usage:
+//
+//	// Generate a 32-byte key for AES-256
+//	key := make([]byte, 32)
+//	if _, err := rand.Read(key); err != nil {
+//	    log.Fatal(err)
+//	}
+//
+//	// Create cookie store
+//	store, err := srv.NewCookieStore("app-session", key, srv.NewOptions())
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//
+//	// Use with session middleware
+//	mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+func NewCookieStore(name string, key []byte, options *Options) (*CookieStore, error) {
+	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
+		return nil, errors.New("key must be 16, 24, or 32 bytes for AES-128, AES-192, or AES-256")
+	}
+
+	if options == nil {
+		options = NewOptions()
+	}
+
+	// Create AES cipher
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode for authenticated encryption
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	return &CookieStore{
+		cipher:  gcm,
+		options: options,
+		name:    name,
+	}, nil
+}
+
+// Get retrieves an existing session from the encrypted cookie.
+// If the cookie doesn't exist, is invalid, or cannot be decrypted,
+// it returns an error.
+func (c *CookieStore) Get(r *http.Request, name string) (*Session, error) {
+	cookie, err := r.Cookie(name)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decode base64 cookie value
+	encryptedData, err := base64.URLEncoding.DecodeString(cookie.Value)
+	if err != nil {
+		return nil, http.ErrNoCookie
+	}
+
+	// Decrypt and deserialize session data
+	values, err := c.decryptSessionData(encryptedData)
+	if err != nil {
+		return nil, http.ErrNoCookie
+	}
+
+	// Create session with decrypted data
+	session := &Session{
+		ID:      "", // Not used for cookie store
+		Values:  values,
+		Options: c.options,
+		IsNew:   false,
+		store:   c,
+		name:    name,
+	}
+
+	return session, nil
+}
+
+// New creates a new session. Since this is a cookie store, no server-side
+// storage is required. The session will be saved as an encrypted cookie
+// when Save() is called.
+func (c *CookieStore) New(_ *http.Request, name string) (*Session, error) {
+	session := &Session{
+		ID:      "", // Not used for cookie store
+		Values:  make(map[interface{}]interface{}),
+		Options: c.options,
+		IsNew:   true,
+		store:   c,
+		name:    name,
+	}
+
+	return session, nil
+}
+
+// Save encrypts the session data and stores it as a cookie.
+// The session values are serialized using gob encoding and then
+// encrypted using AES-GCM before being base64 encoded and stored
+// in the cookie.
+func (c *CookieStore) Save(_ *http.Request, w http.ResponseWriter, session *Session) error {
+	if len(session.Values) == 0 {
+		// Clear cookie if session is empty
+		cookie := &http.Cookie{
+			Name:     session.name,
+			Value:    "",
+			Path:     session.Options.Path,
+			Domain:   session.Options.Domain,
+			MaxAge:   -1, // Delete cookie
+			Secure:   session.Options.Secure,
+			HttpOnly: session.Options.HttpOnly,
+			SameSite: session.Options.SameSite,
+		}
+		http.SetCookie(w, cookie)
+		return nil
+	}
+
+	// Encrypt and encode session data
+	encryptedData, err := c.encryptSessionData(session.Values)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt session data: %w", err)
+	}
+
+	// Encode as base64 for cookie storage
+	cookieValue := base64.URLEncoding.EncodeToString(encryptedData)
+
+	// Check cookie size limit (browsers typically limit to ~4KB)
+	if len(cookieValue) > 4000 {
+		return errors.New("session data too large for cookie storage (>4KB)")
+	}
+
+	// Set cookie
+	cookie := &http.Cookie{
+		Name:     session.name,
+		Value:    cookieValue,
+		Path:     session.Options.Path,
+		Domain:   session.Options.Domain,
+		Secure:   session.Options.Secure,
+		HttpOnly: session.Options.HttpOnly,
+		SameSite: session.Options.SameSite,
+	}
+
+	if session.Options.MaxAge > 0 {
+		cookie.MaxAge = session.Options.MaxAge
+		cookie.Expires = time.Now().Add(time.Duration(session.Options.MaxAge) * time.Second)
+	}
+
+	http.SetCookie(w, cookie)
+	return nil
+}
+
+// encryptSessionData serializes and encrypts session values using AES-GCM.
+func (c *CookieStore) encryptSessionData(values map[interface{}]interface{}) ([]byte, error) {
+	// Serialize session values using gob
+	var buf bytes.Buffer
+	encoder := gob.NewEncoder(&buf)
+	if err := encoder.Encode(values); err != nil {
+		return nil, fmt.Errorf("failed to encode session data: %w", err)
+	}
+
+	plaintext := buf.Bytes()
+
+	// Generate random nonce
+	nonce := make([]byte, c.cipher.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	// Encrypt with AES-GCM (includes authentication)
+	ciphertext := c.cipher.Seal(nonce, nonce, plaintext, nil)
+	return ciphertext, nil
+}
+
+// decryptSessionData decrypts and deserializes session values.
+func (c *CookieStore) decryptSessionData(encryptedData []byte) (map[interface{}]interface{}, error) {
+	if len(encryptedData) < c.cipher.NonceSize() {
+		return nil, errors.New("encrypted data too short")
+	}
+
+	// Extract nonce and ciphertext
+	nonce := encryptedData[:c.cipher.NonceSize()]
+	ciphertext := encryptedData[c.cipher.NonceSize():]
+
+	// Decrypt with AES-GCM (includes authentication verification)
+	plaintext, err := c.cipher.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt session data: %w", err)
+	}
+
+	// Deserialize using gob
+	var values map[interface{}]interface{}
+	decoder := gob.NewDecoder(bytes.NewReader(plaintext))
+	if err := decoder.Decode(&values); err != nil {
+		return nil, fmt.Errorf("failed to decode session data: %w", err)
+	}
+
+	return values, nil
 }

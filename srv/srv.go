@@ -162,7 +162,7 @@ type Route struct {
 //
 // Example:
 //
-//	func getUserHandler(ctx *Context) error {
+//	func getUserHandler(ctx Context) error {
 //	    id := ctx.Param("id")
 //	    user, err := getUserByID(id)
 //	    if err != nil {
@@ -172,17 +172,40 @@ type Route struct {
 //	}
 type HandlerFunc func(ctx Context) error
 
+// HandlerFuncMiddleware represents middleware that works with HandlerFunc.
+// It takes a HandlerFunc and returns a new HandlerFunc, allowing middleware
+// to be chained while maintaining the srv package's error handling pattern.
+// This enables middleware to work directly with the Context interface and
+// maintain the elegant error handling approach.
+//
+// Example:
+//
+//	func AuthMiddleware(next HandlerFunc) HandlerFunc {
+//	    return func(ctx Context) error {
+//	        token := ctx.GetHeader("Authorization")
+//	        if token == "" {
+//	            return erm.Unauthorized("missing authorization header", nil)
+//	        }
+//	        // Store authenticated user in context
+//	        ctx.Set("user", getUserFromToken(token))
+//	        return next(ctx)  // Continue to next handler
+//	    }
+//	}
+type HandlerFuncMiddleware func(next HandlerFunc) HandlerFunc
+
 // Mux provides a convenient wrapper around Go's standard http.ServeMux
 // with helper methods for common HTTP operations, RESTful routing, URL reversing, and centralized error handling.
 //
 // The Mux supports two types of handlers:
 //   - Traditional http.Handler and http.HandlerFunc via Handle() and HandleFunc()
 //   - Enhanced HandlerFunc via HTTP method helpers (Get, Post, etc.) with automatic error handling
+//   - HandlerFunc middleware via the Middleware() method for chaining Context-aware middleware
 type Mux struct {
-	mux        *http.ServeMux
-	errHandler func(ctx Context, err error)
-	routes     map[string]Route // Named routes for URL reversing, key format: "name"
-	routesMu   sync.RWMutex     // Protects routes map from concurrent access
+	mux         *http.ServeMux
+	errHandler  func(ctx Context, err error)
+	routes      map[string]Route        // Named routes for URL reversing, key format: "name"
+	routesMu    sync.RWMutex            // Protects routes map from concurrent access
+	middlewares []HandlerFuncMiddleware // HandlerFunc middleware stack
 }
 
 // NewMux creates a new Mux instance with an underlying http.ServeMux and a default error handler.
@@ -194,8 +217,9 @@ func NewMux() *Mux {
 		errHandler: func(ctx Context, err error) {
 			_ = ctx.String(http.StatusInternalServerError, "Something went wrong")
 		},
-		routes:   make(map[string]Route),
-		routesMu: sync.RWMutex{},
+		routes:      make(map[string]Route),
+		routesMu:    sync.RWMutex{},
+		middlewares: make([]HandlerFuncMiddleware, 0),
 	}
 }
 
@@ -235,9 +259,57 @@ func (m *Mux) ErrorHandler(handler func(c Context, err error)) {
 	m.errHandler = handler
 }
 
-// execHandler is an internal method that wraps HandlerFunc with error handling
-// and registers named routes for URL reversing when a name is provided.
-// It creates a Context and passes it to the handler. If the handler returns
+// Middleware adds HandlerFunc-based middleware to the Mux.
+// Middleware will be applied to all routes registered after this method is called.
+// Middleware are applied in the order they are added (first added = outermost wrapper).
+//
+// The middleware function receives the next HandlerFunc in the chain and returns
+// a new HandlerFunc that typically calls the next function with additional logic
+// before, after, or around the call. This allows middleware to work directly with
+// the Context interface and maintain the elegant error handling pattern.
+//
+// Example:
+//
+//	// Add authentication middleware
+//	mux.Middleware(func(next HandlerFunc) HandlerFunc {
+//	    return func(ctx Context) error {
+//	        token := ctx.GetHeader("Authorization")
+//	        if token == "" {
+//	            return erm.Unauthorized("missing authorization header", nil)
+//	        }
+//	        // Continue to next handler
+//	        return next(ctx)
+//	    }
+//	})
+//
+//	// Add timing middleware
+//	mux.Middleware(func(next HandlerFunc) HandlerFunc {
+//	    return func(ctx Context) error {
+//	        start := time.Now()
+//	        err := next(ctx)
+//	        duration := time.Since(start)
+//	        log.Printf("Request took %v", duration)
+//	        return err
+//	    }
+//	})
+func (m *Mux) Middleware(middleware HandlerFuncMiddleware) {
+	m.middlewares = append(m.middlewares, middleware)
+}
+
+// applyMiddleware applies all registered HandlerFunc middleware to a handler.
+// Middleware are applied in reverse order so that the first added middleware
+// becomes the outermost wrapper, which is the expected behavior.
+func (m *Mux) applyMiddleware(handler HandlerFunc) HandlerFunc {
+	// Apply middleware in reverse order (last added = innermost)
+	for i := len(m.middlewares) - 1; i >= 0; i-- {
+		handler = m.middlewares[i](handler)
+	}
+	return handler
+}
+
+// execHandler is an internal method that wraps HandlerFunc with error handling,
+// applies registered middleware, and registers named routes for URL reversing when a name is provided.
+// It creates a Context and passes it to the middleware chain and handler. If the handler returns
 // an error, it calls the configured error handler with the same context.
 // This method is safe for concurrent use.
 func (m *Mux) execHandler(name, method, pattern string, handler HandlerFunc) {
@@ -249,11 +321,14 @@ func (m *Mux) execHandler(name, method, pattern string, handler HandlerFunc) {
 		m.routesMu.Unlock()
 	}
 
+	// Apply all registered middleware to the handler
+	finalHandler := m.applyMiddleware(handler)
+
 	// Register the handler with the HTTP mux
 	fullPattern := method + " " + pattern
 	m.mux.HandleFunc(fullPattern, func(w http.ResponseWriter, r *http.Request) {
 		ctx := NewHttpContext(w, r)
-		if err := handler(ctx); err != nil {
+		if err := finalHandler(ctx); err != nil {
 			m.errHandler(ctx, err)
 		}
 	})
