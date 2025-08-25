@@ -33,7 +33,7 @@ func init() {
 // HandlerFunc-based Middleware for Context-Aware Operations
 // =============================================================================
 
-// LoggingHandlerFunc is a HandlerFunc-based middleware that logs HTTP requests
+// LoggingMiddleware is a HandlerFunc-based middleware that logs HTTP requests
 // with structured logging using slog. It works directly with the Context interface
 // and maintains the elegant error handling pattern.
 //
@@ -50,8 +50,8 @@ func init() {
 //
 // Example:
 //
-//	mux.Middleware(srv.LoggingHandlerFunc)
-func LoggingHandlerFunc(next HandlerFunc) HandlerFunc {
+//	mux.Middleware(srv.LoggingMiddleware)
+func LoggingMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		start := time.Now()
 
@@ -74,7 +74,7 @@ func LoggingHandlerFunc(next HandlerFunc) HandlerFunc {
 	}
 }
 
-// RecoverHandlerFunc is a HandlerFunc-based middleware that recovers from panics
+// RecoverMiddleware is a HandlerFunc-based middleware that recovers from panics
 // during HTTP request processing. It works directly with the Context interface
 // and maintains the elegant error handling pattern.
 //
@@ -89,8 +89,8 @@ func LoggingHandlerFunc(next HandlerFunc) HandlerFunc {
 //
 // Example:
 //
-//	mux.Middleware(srv.RecoverHandlerFunc)
-func RecoverHandlerFunc(next HandlerFunc) HandlerFunc {
+//	mux.Middleware(srv.RecoverMiddleware)
+func RecoverMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -114,7 +114,7 @@ func RecoverHandlerFunc(next HandlerFunc) HandlerFunc {
 	}
 }
 
-// CORSHandlerFunc returns a HandlerFunc-based CORS middleware with the provided configuration.
+// CORSMiddleware returns a HandlerFunc-based CORS middleware with the provided configuration.
 // It works directly with the Context interface and maintains the elegant error handling pattern.
 //
 // Note: For proper CORS support with preflight requests, consider using the http.Handler
@@ -124,8 +124,8 @@ func RecoverHandlerFunc(next HandlerFunc) HandlerFunc {
 // Example usage:
 //
 //	// Use default configuration (allows all origins)
-//	mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))
-func CORSHandlerFunc(config CORSConfig) HandlerFuncMiddleware {
+//	mux.Middleware(srv.CORSMiddleware(srv.DefaultCORSConfig))
+func CORSMiddleware(config CORSConfig) HandlerFuncMiddleware {
 	// Apply defaults if not set
 	if len(config.AllowOrigins) == 0 {
 		config.AllowOrigins = DefaultCORSConfig.AllowOrigins
@@ -272,7 +272,7 @@ var DefaultTrailingSlashConfig = TrailingSlashConfig{
 	RedirectCode: 0, // Forward internally by default
 }
 
-// AddTrailingSlashHandlerFunc returns a HandlerFunc-based middleware that adds a trailing
+// AddTrailingSlashMiddleware returns a HandlerFunc-based middleware that adds a trailing
 // slash to request URLs that don't already have one. It works directly with the Context
 // interface and maintains the elegant error handling pattern.
 //
@@ -285,12 +285,12 @@ var DefaultTrailingSlashConfig = TrailingSlashConfig{
 // Example usage:
 //
 //	// Default behavior (internal forward)
-//	mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig))
+//	mux.Middleware(srv.AddTrailingSlashMiddleware(srv.DefaultTrailingSlashConfig))
 //
 //	// Redirect with 301 status code
 //	config := srv.TrailingSlashConfig{RedirectCode: 301}
-//	mux.Middleware(srv.AddTrailingSlashHandlerFunc(config))
-func AddTrailingSlashHandlerFunc(config TrailingSlashConfig) HandlerFuncMiddleware {
+//	mux.Middleware(srv.AddTrailingSlashMiddleware(config))
+func AddTrailingSlashMiddleware(config TrailingSlashConfig) HandlerFuncMiddleware {
 	return func(next HandlerFunc) HandlerFunc {
 		return func(ctx Context) error {
 			req := ctx.Request()
@@ -333,7 +333,7 @@ func AddTrailingSlashHandlerFunc(config TrailingSlashConfig) HandlerFuncMiddlewa
 // Session Middleware
 // =============================================================================
 
-// SessionHandlerFunc returns a HandlerFunc-based session middleware that automatically
+// SessionMiddleware returns a HandlerFunc-based session middleware that automatically
 // manages sessions for each request. It loads existing sessions from the store or
 // creates new ones as needed, makes the session available through the Context,
 // and automatically saves the session after the request completes.
@@ -347,7 +347,7 @@ func AddTrailingSlashHandlerFunc(config TrailingSlashConfig) HandlerFuncMiddlewa
 //	store := srv.NewInMemoryStore("myapp-session", srv.NewOptions())
 //
 //	// Add session middleware
-//	mux.Middleware(srv.SessionHandlerFunc(store, "myapp-session"))
+//	mux.Middleware(srv.SessionMiddleware(store, "myapp-session"))
 //
 //	// Use in handlers
 //	mux.Get("profile", "/profile", func(ctx srv.Context) error {
@@ -358,7 +358,7 @@ func AddTrailingSlashHandlerFunc(config TrailingSlashConfig) HandlerFuncMiddlewa
 //		}
 //		return ctx.JSON(200, map[string]interface{}{"userID": userID})
 //	})
-func SessionHandlerFunc(store Store, sessionName string) HandlerFuncMiddleware {
+func SessionMiddleware(store Store, sessionName string) HandlerFuncMiddleware {
 	return func(next HandlerFunc) HandlerFunc {
 		return func(ctx Context) error {
 			req := ctx.Request()
@@ -383,7 +383,7 @@ func SessionHandlerFunc(store Store, sessionName string) HandlerFuncMiddleware {
 			if saveErr := session.Save(req, ctx.ResponseWriter()); saveErr != nil {
 				// Log save error but don't override handler error
 				slog.With(
-					slog.String("name", "srv.SessionHandlerFunc"),
+					slog.String("name", "srv.SessionMiddleware"),
 					slog.String("error", saveErr.Error()),
 				).Error("failed to save session")
 			}
@@ -715,7 +715,7 @@ type CookieStore struct {
 //	}
 //
 //	// Use with session middleware
-//	mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+//	mux.Middleware(srv.SessionMiddleware(store, "app-session"))
 func NewCookieStore(name string, key []byte, options *Options) (*CookieStore, error) {
 	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
 		return nil, errors.New("key must be 16, 24, or 32 bytes for AES-128, AES-192, or AES-256")

@@ -31,11 +31,11 @@ func captureLogs(t *testing.T, fn func()) string {
 // HandlerFunc Middleware Tests
 // =============================================================================
 
-func TestLoggingHandlerFunc(t *testing.T) {
+func TestLoggingMiddleware(t *testing.T) {
 	mux := NewMux()
 
 	// Add logging middleware
-	mux.Middleware(LoggingHandlerFunc)
+	mux.Middleware(LoggingMiddleware)
 
 	// Register a route
 	mux.Post("", "/test", func(ctx Context) error {
@@ -69,7 +69,7 @@ func TestLoggingHandlerFunc(t *testing.T) {
 	}
 }
 
-func TestRecoverHandlerFunc(t *testing.T) {
+func TestRecoverMiddleware(t *testing.T) {
 	mux := NewMux()
 
 	// Set up error handler to capture panic-converted error
@@ -80,7 +80,7 @@ func TestRecoverHandlerFunc(t *testing.T) {
 	})
 
 	// Add recover middleware
-	mux.Middleware(RecoverHandlerFunc)
+	mux.Middleware(RecoverMiddleware)
 
 	// Register a route that panics
 	mux.Get("", "/panic", func(ctx Context) error {
@@ -121,11 +121,11 @@ func TestRecoverHandlerFunc(t *testing.T) {
 	}
 }
 
-func TestCORSHandlerFunc_DefaultConfig(t *testing.T) {
+func TestCORSMiddleware_DefaultConfig(t *testing.T) {
 	mux := NewMux()
 
 	// Add CORS middleware
-	mux.Middleware(CORSHandlerFunc(DefaultCORSConfig))
+	mux.Middleware(CORSMiddleware(DefaultCORSConfig))
 
 	// Register a route
 	mux.Get("", "/test", func(ctx Context) error {
@@ -175,11 +175,11 @@ func TestCORSHandlerFunc_DefaultConfig(t *testing.T) {
 	})
 }
 
-func TestAddTrailingSlashHandlerFunc_DefaultConfig(t *testing.T) {
+func TestAddTrailingSlashMiddleware_DefaultConfig(t *testing.T) {
 	mux := NewMux()
 
 	// Add trailing slash middleware
-	mux.Middleware(AddTrailingSlashHandlerFunc(DefaultTrailingSlashConfig))
+	mux.Middleware(AddTrailingSlashMiddleware(DefaultTrailingSlashConfig))
 
 	// Register routes both with and without trailing slashes to test the middleware
 	mux.Get("", "/users", func(ctx Context) error {
@@ -230,9 +230,9 @@ func TestHandlerFuncMiddleware_Integration(t *testing.T) {
 	mux := NewMux()
 
 	// Chain multiple HandlerFunc middleware
-	mux.Middleware(LoggingHandlerFunc)
-	mux.Middleware(RecoverHandlerFunc)
-	mux.Middleware(CORSHandlerFunc(DefaultCORSConfig))
+	mux.Middleware(LoggingMiddleware)
+	mux.Middleware(RecoverMiddleware)
+	mux.Middleware(CORSMiddleware(DefaultCORSConfig))
 
 	// Register a route
 	mux.Get("", "/test", func(ctx Context) error {
@@ -657,7 +657,7 @@ func TestInMemoryStore_ConcurrentAccess(t *testing.T) {
 // Session Middleware Tests
 // =============================================================================
 
-func TestSessionHandlerFunc_NewSession(t *testing.T) {
+func TestSessionMiddleware_NewSession(t *testing.T) {
 	store := NewInMemoryStore("app-session", &Options{
 		Path:     "/",
 		MaxAge:   3600,
@@ -667,7 +667,7 @@ func TestSessionHandlerFunc_NewSession(t *testing.T) {
 	defer store.Close()
 
 	mux := NewMux()
-	mux.Middleware(SessionHandlerFunc(store, "app-session"))
+	mux.Middleware(SessionMiddleware(store, "app-session"))
 
 	// Register handler that uses session
 	mux.Get("", "/test", func(ctx Context) error {
@@ -726,7 +726,7 @@ func TestSessionHandlerFunc_NewSession(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerFunc_ExistingSession(t *testing.T) {
+func TestSessionMiddleware_ExistingSession(t *testing.T) {
 	store := NewInMemoryStore("app-session", &Options{
 		Path:     "/",
 		MaxAge:   3600,
@@ -736,7 +736,7 @@ func TestSessionHandlerFunc_ExistingSession(t *testing.T) {
 	defer store.Close()
 
 	mux := NewMux()
-	mux.Middleware(SessionHandlerFunc(store, "app-session"))
+	mux.Middleware(SessionMiddleware(store, "app-session"))
 
 	// First handler to create session
 	mux.Get("", "/create", func(ctx Context) error {
@@ -816,7 +816,7 @@ func TestSessionHandlerFunc_ExistingSession(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerFunc_ErrorInHandler(t *testing.T) {
+func TestSessionMiddleware_ErrorInHandler(t *testing.T) {
 	store := NewInMemoryStore("app-session", NewOptions())
 	defer store.Close()
 
@@ -829,7 +829,7 @@ func TestSessionHandlerFunc_ErrorInHandler(t *testing.T) {
 		_ = ctx.String(500, "Handler error: "+err.Error())
 	})
 
-	mux.Middleware(SessionHandlerFunc(store, "app-session"))
+	mux.Middleware(SessionMiddleware(store, "app-session"))
 
 	// Handler that returns an error
 	mux.Get("", "/error", func(ctx Context) error {
@@ -861,7 +861,7 @@ func TestSessionHandlerFunc_ErrorInHandler(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerFunc_Integration(t *testing.T) {
+func TestSessionMiddleware_Integration(t *testing.T) {
 	// Test integration with other middleware
 	store := NewInMemoryStore("app-session", &Options{
 		Path:     "/",
@@ -874,10 +874,10 @@ func TestSessionHandlerFunc_Integration(t *testing.T) {
 	mux := NewMux()
 
 	// Add multiple middleware
-	mux.Middleware(LoggingHandlerFunc)
-	mux.Middleware(RecoverHandlerFunc)
-	mux.Middleware(SessionHandlerFunc(store, "app-session"))
-	mux.Middleware(CORSHandlerFunc(DefaultCORSConfig))
+	mux.Middleware(LoggingMiddleware)
+	mux.Middleware(RecoverMiddleware)
+	mux.Middleware(SessionMiddleware(store, "app-session"))
+	mux.Middleware(CORSMiddleware(DefaultCORSConfig))
 
 	// Handler that uses session
 	mux.Get("", "/profile", func(ctx Context) error {
@@ -996,7 +996,7 @@ func TestSessionHandlerFunc_Integration(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerFunc_StoreErrors(t *testing.T) {
+func TestSessionMiddleware_StoreErrors(t *testing.T) {
 	// Test behavior when store operations fail
 	store := NewInMemoryStore("test-session", NewOptions())
 	defer store.Close()
@@ -1010,7 +1010,7 @@ func TestSessionHandlerFunc_StoreErrors(t *testing.T) {
 		_ = ctx.String(500, "Error: "+err.Error())
 	})
 
-	mux.Middleware(SessionHandlerFunc(store, "test-session"))
+	mux.Middleware(SessionMiddleware(store, "test-session"))
 
 	// Normal handler
 	mux.Get("", "/test", func(ctx Context) error {
@@ -1026,7 +1026,7 @@ func TestSessionHandlerFunc_StoreErrors(t *testing.T) {
 		capturedError = err
 		_ = ctx.String(500, "Store error")
 	})
-	mux2.Middleware(SessionHandlerFunc(errorStoreInstance, "test-session"))
+	mux2.Middleware(SessionMiddleware(errorStoreInstance, "test-session"))
 	mux2.Get("", "/test", func(ctx Context) error {
 		return ctx.String(200, "Should not reach here")
 	})
@@ -1524,7 +1524,7 @@ func TestCookieStore_ConcurrentAccess(t *testing.T) {
 }
 
 func TestCookieStore_Integration(t *testing.T) {
-	// Test integration with SessionHandlerFunc
+	// Test integration with SessionMiddleware
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		t.Fatalf("Failed to generate key: %v", err)
@@ -1541,7 +1541,7 @@ func TestCookieStore_Integration(t *testing.T) {
 	}
 
 	mux := NewMux()
-	mux.Middleware(SessionHandlerFunc(store, "app-session"))
+	mux.Middleware(SessionMiddleware(store, "app-session"))
 
 	// Handler that uses session
 	mux.Get("", "/test", func(ctx Context) error {

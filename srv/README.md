@@ -48,12 +48,12 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+    mux.Middleware(srv.SessionMiddleware(store, "app-session"))
     
     // Alternative: In-memory session store (for single-instance apps)
     // store := srv.NewInMemoryStore("app-session", srv.NewOptions())
     // defer store.Close()
-    // mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+    // mux.Middleware(srv.SessionMiddleware(store, "app-session"))
     
     // Add named routes for URL generation
     mux.Get("users", "/users", func(ctx srv.Context) error {
@@ -92,8 +92,8 @@ func main() {
     })
     
     // Add middleware
-    mux.Middleware(srv.LoggingHandlerFunc)
-    mux.Middleware(srv.RecoverHandlerFunc)
+    mux.Middleware(srv.LoggingMiddleware)
+    mux.Middleware(srv.RecoverMiddleware)
     
     // Run server with graceful shutdown
     err := srv.RunServer(mux, "localhost", "8080", func() error {
@@ -606,20 +606,20 @@ The srv package uses HandlerFunc-based middleware that works seamlessly with the
 
 **Logging Middleware**
 ```go
-mux.Middleware(srv.LoggingHandlerFunc)  // Structured logging with slog
+mux.Middleware(srv.LoggingMiddleware)  // Structured logging with slog
 ```
 Captures: method, path, user agent, remote address, and processing duration
 
 **Recovery Middleware**
 ```go
-mux.Middleware(srv.RecoverHandlerFunc)  // Panic recovery with error conversion
+mux.Middleware(srv.RecoverMiddleware)  // Panic recovery with error conversion
 ```
 Converts panics to errors that are handled by the error handler
 
 **CORS Middleware**
 ```go
 // Default CORS configuration (allows all origins)
-mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))
+mux.Middleware(srv.CORSMiddleware(srv.DefaultCORSConfig))
 
 // Custom CORS configuration
 corsConfig := srv.CORSConfig{
@@ -629,18 +629,18 @@ corsConfig := srv.CORSConfig{
     AllowCredentials: true,
     MaxAge:           3600,
 }
-mux.Middleware(srv.CORSHandlerFunc(corsConfig))
+mux.Middleware(srv.CORSMiddleware(corsConfig))
 ```
 Handles Cross-Origin Resource Sharing with configurable origins, methods, headers, and security options
 
 **Trailing Slash Middleware**
 ```go
 // Default configuration (internal forward)
-mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig))
+mux.Middleware(srv.AddTrailingSlashMiddleware(srv.DefaultTrailingSlashConfig))
 
 // Redirect configuration
 redirectConfig := srv.TrailingSlashConfig{RedirectCode: 301}
-mux.Middleware(srv.AddTrailingSlashHandlerFunc(redirectConfig))
+mux.Middleware(srv.AddTrailingSlashMiddleware(redirectConfig))
 ```
 Adds trailing slashes to URLs for consistency and SEO. Can either redirect or forward internally
 
@@ -651,7 +651,7 @@ store := srv.NewInMemoryStore("app-session", srv.NewOptions())
 defer store.Close()  // Important: cleanup store on shutdown
 
 // Add session middleware
-mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+mux.Middleware(srv.SessionMiddleware(store, "app-session"))
 
 // Use sessions in handlers
 mux.Get("profile", "/profile", func(ctx srv.Context) error {
@@ -692,7 +692,7 @@ options := &srv.Options{
 store := srv.NewInMemoryStore("secure-session", options)
 
 // Use with middleware
-mux.Middleware(srv.SessionHandlerFunc(store, "secure-session"))
+mux.Middleware(srv.SessionMiddleware(store, "secure-session"))
 
 // Custom store implementation (example)
 type RedisStore struct {
@@ -729,7 +729,7 @@ if err != nil {
 }
 
 // Use with session middleware (no defer Close() needed for cookie store)
-mux.Middleware(srv.SessionHandlerFunc(store, "secure-session"))
+mux.Middleware(srv.SessionMiddleware(store, "secure-session"))
 
 // Session usage remains the same
 mux.Post("login", "/login", func(ctx srv.Context) error {
@@ -814,11 +814,11 @@ Session management provides:
 #### Middleware Chaining
 ```go
 // Add multiple middleware (applied in order added - first added = outermost wrapper)
-mux.Middleware(srv.LoggingHandlerFunc)                                    // Outermost: logs all requests
-mux.Middleware(srv.RecoverHandlerFunc)                                    // Recovers from panics
-mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig)) // URL normalization
-mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))               // CORS headers
-mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))             // Session management
+mux.Middleware(srv.LoggingMiddleware)                                    // Outermost: logs all requests
+mux.Middleware(srv.RecoverMiddleware)                                    // Recovers from panics
+mux.Middleware(srv.AddTrailingSlashMiddleware(srv.DefaultTrailingSlashConfig)) // URL normalization
+mux.Middleware(srv.CORSMiddleware(srv.DefaultCORSConfig))               // CORS headers
+mux.Middleware(srv.SessionMiddleware(store, "app-session"))             // Session management
 // Add your custom middleware...
 mux.Middleware(func(next srv.HandlerFunc) srv.HandlerFunc {
     return func(ctx srv.Context) error {
@@ -926,11 +926,11 @@ mux := srv.NewMux()
 // Add session middleware first
 store := srv.NewInMemoryStore("app-session", srv.NewOptions())
 defer store.Close()
-mux.Middleware(srv.SessionHandlerFunc(store, "app-session"))
+mux.Middleware(srv.SessionMiddleware(store, "app-session"))
 
 // Add HandlerFunc middleware (recommended)
-mux.Middleware(srv.LoggingHandlerFunc)    // Structured logging
-mux.Middleware(srv.RecoverHandlerFunc)    // Panic recovery
+mux.Middleware(srv.LoggingMiddleware)    // Structured logging
+mux.Middleware(srv.RecoverMiddleware)    // Panic recovery
 
 // Add custom authentication middleware
 mux.Middleware(func(next srv.HandlerFunc) srv.HandlerFunc {
@@ -952,7 +952,7 @@ mux.Middleware(func(next srv.HandlerFunc) srv.HandlerFunc {
 })
 
 // Add CORS middleware
-mux.Middleware(srv.CORSHandlerFunc(srv.CORSConfig{
+mux.Middleware(srv.CORSMiddleware(srv.CORSConfig{
     AllowOrigins:     []string{"https://example.com"},
     AllowCredentials: true,
     ExposeHeaders:    []string{"X-Total-Count"},
@@ -985,7 +985,7 @@ mux.Middleware(func(next srv.HandlerFunc) srv.HandlerFunc {
 })
 
 // Add logging middleware
-mux.Middleware(srv.LoggingHandlerFunc)
+mux.Middleware(srv.LoggingMiddleware)
 
 // Register handler with automatic Context and error handling
 mux.Post("user-create", "/users", createUserHandler)
@@ -1183,10 +1183,10 @@ BenchmarkMux_RouteMatching         271.8 ns/op   224 B/op    5 allocs/op
 Place middleware in logical order - logging first, authentication/authorization before business logic:
 
 ```go
-mux.Middleware(srv.LoggingHandlerFunc)                                    // First: log everything
-mux.Middleware(srv.RecoverHandlerFunc)                                    // Second: catch panics
-mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig)) // Third: URL normalization
-mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))               // Fourth: CORS headers
+mux.Middleware(srv.LoggingMiddleware)                                    // First: log everything
+mux.Middleware(srv.RecoverMiddleware)                                    // Second: catch panics
+mux.Middleware(srv.AddTrailingSlashMiddleware(srv.DefaultTrailingSlashConfig)) // Third: URL normalization
+mux.Middleware(srv.CORSMiddleware(srv.DefaultCORSConfig))               // Fourth: CORS headers
 mux.Middleware(AuthenticationMiddleware)                                  // Fifth: auth before business logic
 mux.Middleware(RateLimitingMiddleware)                                    // Last: rate limiting
 ```
@@ -1215,7 +1215,7 @@ Configure CORS appropriately for your security requirements:
 
 ```go
 // Development - permissive CORS
-mux.Middleware(srv.CORSHandlerFunc(srv.DefaultCORSConfig))
+mux.Middleware(srv.CORSMiddleware(srv.DefaultCORSConfig))
 
 // Production - restrictive CORS
 prodCorsConfig := srv.CORSConfig{
@@ -1225,7 +1225,7 @@ prodCorsConfig := srv.CORSConfig{
     AllowCredentials: true,
     MaxAge:           3600,
 }
-mux.Middleware(srv.CORSHandlerFunc(prodCorsConfig))
+mux.Middleware(srv.CORSMiddleware(prodCorsConfig))
 ```
 
 ### 5. Trailing Slash Configuration
@@ -1233,15 +1233,15 @@ Configure trailing slash behavior based on your needs:
 
 ```go
 // Default - internal forward (no redirect)
-mux.Middleware(srv.AddTrailingSlashHandlerFunc(srv.DefaultTrailingSlashConfig))
+mux.Middleware(srv.AddTrailingSlashMiddleware(srv.DefaultTrailingSlashConfig))
 
 // SEO-friendly permanent redirect
 seoConfig := srv.TrailingSlashConfig{RedirectCode: 301}
-mux.Middleware(srv.AddTrailingSlashHandlerFunc(seoConfig))
+mux.Middleware(srv.AddTrailingSlashMiddleware(seoConfig))
 
 // Temporary redirect for testing
 testConfig := srv.TrailingSlashConfig{RedirectCode: 302}
-mux.Middleware(srv.AddTrailingSlashHandlerFunc(testConfig))
+mux.Middleware(srv.AddTrailingSlashMiddleware(testConfig))
 ```
 
 ### 6. Resource Cleanup
@@ -1261,8 +1261,8 @@ For custom server configurations, use the individual components:
 
 ```go
 mux := srv.NewMux()
-mux.Middleware(srv.LoggingHandlerFunc)
-mux.Middleware(srv.RecoverHandlerFunc)
+mux.Middleware(srv.LoggingMiddleware)
+mux.Middleware(srv.RecoverMiddleware)
 
 server := &http.Server{
     Addr:         ":8080",
