@@ -176,6 +176,9 @@ err := ctx.String(200, "Hello, World!")
 // HTML response
 err := ctx.HTML(200, "<h1>Welcome</h1>")
 
+// HTML Blob response
+err := ctx.HTMLBlob(200, []byte("<h1>Welcome</h1>"))
+
 // Redirects
 ctx.Redirect(302, "/login")
 

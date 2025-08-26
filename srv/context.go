@@ -29,8 +29,9 @@ type Context interface {
 	SetCookie(cookie *http.Cookie)
 	JSON(code int, v interface{}) error
 	String(code int, text string) error
-	Redirect(code int, path string)
+	Redirect(code int, path string) error
 	HTML(code int, html string) error
+	HTMLBlob(code int, html []byte) error
 	WriteHeader(code int)
 }
 
@@ -227,12 +228,22 @@ func (c *HttpContext) HTML(code int, html string) error {
 	return err
 }
 
+// HTMLBlob writes an HTML response with the specified status code.
+// The Content-Type header is automatically set to "text/html".
+func (c *HttpContext) HTMLBlob(code int, blob []byte) error {
+	c.SetHeader("Content-Type", MIMETextHTMLCharsetUTF8)
+	c.Response().WriteHeader(code)
+	_, err := c.Response().Write(blob)
+	return err
+}
+
 // Redirect sends an HTTP redirect response with the specified status code and URL.
 // Common status codes are 301 (permanent), 302 (found), 303 (see other),
 // 307 (temporary), and 308 (permanent redirect).
-func (c *HttpContext) Redirect(code int, url string) {
+func (c *HttpContext) Redirect(code int, url string) error {
 	c.SetHeader("Location", url)
 	c.Response().WriteHeader(code)
+	return nil
 }
 
 // WriteHeader sends an HTTP response header with the provided status code.

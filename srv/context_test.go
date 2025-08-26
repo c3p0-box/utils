@@ -392,12 +392,37 @@ func TestHttpContext_ResponseMethods(t *testing.T) {
 		}
 	})
 
+	t.Run("HTMLBlob response", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/page", nil)
+		rec := httptest.NewRecorder()
+		ctx := NewHttpContext(rec, req)
+
+		html := []byte("<html><body><h1>Hello</h1></body></html>")
+		err := ctx.HTMLBlob(200, html)
+		if err != nil {
+			t.Errorf("Expected no error from HTML, got %v", err)
+		}
+
+		if rec.Code != 200 {
+			t.Errorf("Expected status code 200, got %d", rec.Code)
+		}
+
+		contentType := rec.Header().Get("Content-Type")
+		if contentType != MIMETextHTMLCharsetUTF8 {
+			t.Errorf("Expected Content-Type '%s', got '%s'", MIMETextHTML, contentType)
+		}
+
+		if rec.Body.String() != string(html) {
+			t.Errorf("Expected body '%s', got '%s'", html, rec.Body.String())
+		}
+	})
+
 	t.Run("Redirect response", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/old-page", nil)
 		rec := httptest.NewRecorder()
 		ctx := NewHttpContext(rec, req)
 
-		ctx.Redirect(302, "/new-page")
+		_ = ctx.Redirect(302, "/new-page")
 
 		if rec.Code != 302 {
 			t.Errorf("Expected status code 302, got %d", rec.Code)
