@@ -179,6 +179,9 @@ type Error interface {
 
 	// WithParam adds a template parameter for i18n substitution
 	WithParam(key string, value interface{}) Error
+
+	// WithRootError sets the root error
+	WithRootError(root error) Error
 }
 
 // StackError represents an application error enriched with stack trace,
@@ -434,6 +437,17 @@ func (e *StackError) WithParam(key string, value interface{}) Error {
 		err.params = newParams
 	}
 	err.params[key] = value
+	return &err
+}
+
+func (e *StackError) WithRootError(root error) Error {
+	if e == nil {
+		return nil
+	}
+	err := *e
+	if root != nil {
+		err.root = root
+	}
 	return &err
 }
 

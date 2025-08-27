@@ -175,6 +175,68 @@ func TestStackErrorMethods(t *testing.T) {
 	}
 }
 
+// TestStackError_WithRootError tests the WithRootError method
+func TestStackError_WithRootError(t *testing.T) {
+	t.Run("nil receiver", func(t *testing.T) {
+		var err *StackError
+		if err.WithRootError(errors.New("new root")) != nil {
+			t.Error("WithRootError on nil receiver should return nil")
+		}
+	})
+
+	t.Run("with new root error", func(t *testing.T) {
+		originalRoot := errors.New("original root")
+		newRoot := errors.New("new root")
+		originalErr := New(http.StatusInternalServerError, "original message", originalRoot)
+
+		newErr := originalErr.WithRootError(newRoot)
+
+		if !errors.Is(newErr, newRoot) {
+			t.Error("new error should wrap the new root error")
+		}
+		if errors.Is(newErr, originalRoot) {
+			t.Error("new error should not wrap the original root error")
+		}
+
+		// Check original error is unchanged
+		if !errors.Is(originalErr, originalRoot) {
+			t.Error("original error should still wrap the original root error")
+		}
+		if newErr == originalErr {
+			t.Error("WithRootError should return a new instance")
+		}
+	})
+
+	t.Run("with nil root error", func(t *testing.T) {
+		originalRoot := errors.New("original root")
+		originalErr := New(http.StatusInternalServerError, "original message", originalRoot)
+
+		newErr := originalErr.WithRootError(nil)
+
+		// The root error should not be changed to nil, it should remain the same.
+		if !errors.Is(newErr, originalRoot) {
+			t.Error("new error should still wrap the original root error when nil is passed")
+		}
+		if newErr == originalErr {
+			t.Error("WithRootError should return a new instance even with nil root")
+		}
+	})
+
+	t.Run("on error with no root", func(t *testing.T) {
+		newRoot := errors.New("new root")
+		originalErr := New(http.StatusBadRequest, "no root error", nil)
+
+		newErr := originalErr.WithRootError(newRoot)
+
+		if !errors.Is(newErr, newRoot) {
+			t.Error("new error should wrap the new root error")
+		}
+		if newErr.Unwrap() != newRoot {
+			t.Errorf("Unwrap() should return the new root error")
+		}
+	})
+}
+
 // =============================================================================
 // Validation-Related Method Tests
 // =============================================================================
