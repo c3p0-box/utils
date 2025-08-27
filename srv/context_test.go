@@ -158,7 +158,7 @@ func TestHttpContext_RequestInformation(t *testing.T) {
 
 	t.Run("WebSocket request", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/ws", nil)
-		req.Header.Set("Upgrade", "websocket")
+		req.Header.Set(HeaderUpgrade, "websocket")
 		rec := httptest.NewRecorder()
 		ctx := NewHttpContext(rec, req)
 
@@ -216,7 +216,7 @@ func TestHttpContext_Parameters(t *testing.T) {
 		form.Add("password", "secret")
 
 		req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", MIMEApplicationForm)
+		req.Header.Set(HeaderContentType, MIMEApplicationForm)
 		rec := httptest.NewRecorder()
 		ctx := NewHttpContext(rec, req)
 
@@ -256,12 +256,12 @@ func TestHttpContext_Headers(t *testing.T) {
 	}
 
 	// Test response headers
-	ctx.SetHeader("Content-Type", MIMEApplicationJSON)
+	ctx.SetHeader(HeaderContentType, MIMEApplicationJSON)
 	ctx.AddHeader("X-Custom", "value1")
 	ctx.AddHeader("X-Custom", "value2")
 
-	if rec.Header().Get("Content-Type") != MIMEApplicationJSON {
-		t.Errorf("Expected Content-Type '%s', got '%s'", MIMEApplicationJSON, rec.Header().Get("Content-Type"))
+	if rec.Header().Get(HeaderContentType) != MIMEApplicationJSON {
+		t.Errorf("Expected Content-Type '%s', got '%s'", MIMEApplicationJSON, rec.Header().Get(HeaderContentType))
 	}
 
 	customHeaders := rec.Header().Values("X-Custom")
@@ -334,7 +334,7 @@ func TestHttpContext_ResponseMethods(t *testing.T) {
 			t.Errorf("Expected status code 200, got %d", rec.Code)
 		}
 
-		contentType := rec.Header().Get("Content-Type")
+		contentType := rec.Header().Get(HeaderContentType)
 		if contentType != MIMEApplicationJSON {
 			t.Errorf("Expected Content-Type '%s', got '%s'", MIMEApplicationJSON, contentType)
 		}
@@ -377,7 +377,7 @@ func TestHttpContext_ResponseMethods(t *testing.T) {
 			t.Errorf("Expected status code 201, got %d", rec.Code)
 		}
 
-		contentType := rec.Header().Get("Content-Type")
+		contentType := rec.Header().Get(HeaderContentType)
 		if contentType != MIMETextPlain {
 			t.Errorf("Expected Content-Type '%s', got '%s'", MIMETextPlain, contentType)
 		}
@@ -402,7 +402,7 @@ func TestHttpContext_ResponseMethods(t *testing.T) {
 			t.Errorf("Expected status code 200, got %d", rec.Code)
 		}
 
-		contentType := rec.Header().Get("Content-Type")
+		contentType := rec.Header().Get(HeaderContentType)
 		if contentType != MIMETextHTMLCharsetUTF8 {
 			t.Errorf("Expected Content-Type '%s', got '%s'", MIMETextHTML, contentType)
 		}
@@ -427,7 +427,7 @@ func TestHttpContext_ResponseMethods(t *testing.T) {
 			t.Errorf("Expected status code 200, got %d", rec.Code)
 		}
 
-		contentType := rec.Header().Get("Content-Type")
+		contentType := rec.Header().Get(HeaderContentType)
 		if contentType != MIMETextHTMLCharsetUTF8 {
 			t.Errorf("Expected Content-Type '%s', got '%s'", MIMETextHTML, contentType)
 		}

@@ -112,7 +112,7 @@ func (c *HttpContext) IsTLS() bool {
 // IsWebSocket returns true if this is a WebSocket upgrade request.
 // It checks for the "Upgrade: websocket" header.
 func (c *HttpContext) IsWebSocket() bool {
-	return c.Request().Header.Get("Upgrade") == "websocket"
+	return c.Request().Header.Get(HeaderUpgrade) == "websocket"
 }
 
 // Method returns the HTTP method of the request (GET, POST, etc.).
@@ -215,7 +215,7 @@ func (c *HttpContext) SetCookie(cookie *http.Cookie) {
 // The Content-Type header is automatically set to "application/json".
 // Returns an error if JSON encoding fails.
 func (c *HttpContext) JSON(code int, v interface{}) error {
-	c.SetHeader("Content-Type", MIMEApplicationJSON)
+	c.SetHeader(HeaderContentType, MIMEApplicationJSON)
 	c.Response().WriteHeader(code)
 	return json.NewEncoder(c.Response()).Encode(v)
 }
@@ -223,7 +223,7 @@ func (c *HttpContext) JSON(code int, v interface{}) error {
 // String writes a plain text response with the specified status code.
 // The Content-Type header is automatically set to "text/plain".
 func (c *HttpContext) String(code int, text string) error {
-	c.SetHeader("Content-Type", MIMETextPlain)
+	c.SetHeader(HeaderContentType, MIMETextPlain)
 	c.Response().WriteHeader(code)
 	_, err := c.Response().Write([]byte(text))
 	return err
@@ -232,7 +232,7 @@ func (c *HttpContext) String(code int, text string) error {
 // HTML writes an HTML response with the specified status code.
 // The Content-Type header is automatically set to "text/html".
 func (c *HttpContext) HTML(code int, html string) error {
-	c.SetHeader("Content-Type", MIMETextHTMLCharsetUTF8)
+	c.SetHeader(HeaderContentType, MIMETextHTMLCharsetUTF8)
 	c.Response().WriteHeader(code)
 	_, err := c.Response().Write([]byte(html))
 	return err
@@ -241,7 +241,7 @@ func (c *HttpContext) HTML(code int, html string) error {
 // HTMLBlob writes an HTML response with the specified status code.
 // The Content-Type header is automatically set to "text/html".
 func (c *HttpContext) HTMLBlob(code int, blob []byte) error {
-	c.SetHeader("Content-Type", MIMETextHTMLCharsetUTF8)
+	c.SetHeader(HeaderContentType, MIMETextHTMLCharsetUTF8)
 	c.Response().WriteHeader(code)
 	_, err := c.Response().Write(blob)
 	return err

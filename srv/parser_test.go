@@ -186,7 +186,7 @@ func TestParseRequest_JSON_WithQueryParams(t *testing.T) {
 
 	jsonBytes, _ := json.Marshal(jsonData)
 	req := httptest.NewRequest("POST", "http://example.com/users?page=2&sort=name&filter_by=active&limit=10&debug=true&rating=4.5", bytes.NewReader(jsonBytes))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(HeaderContentType, MIMEApplicationJSON)
 
 	var result UserRequest
 	err := ParseRequest(req, &result)
@@ -243,7 +243,7 @@ func TestParseRequest_Form_WithQueryParams(t *testing.T) {
 	formData.Set("score", "88.7")
 
 	req := httptest.NewRequest("POST", "http://example.com/users?page=3&sort=email&filter_by=inactive&limit=20&debug=false&rating=3.2", strings.NewReader(formData.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(HeaderContentType, MIMEApplicationForm)
 
 	var result UserRequest
 	err := ParseRequest(req, &result)
@@ -304,7 +304,7 @@ func TestParseRequest_MultipartForm_WithQueryParams(t *testing.T) {
 	_ = writer.Close()
 
 	req := httptest.NewRequest("POST", "http://example.com/users?page=1&sort=age&filter_by=all&limit=5&debug=true&rating=5.0", &buf)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set(HeaderContentType, writer.FormDataContentType())
 
 	var result UserRequest
 	err := ParseRequest(req, &result)
@@ -391,7 +391,7 @@ func TestParseRequest_ErrorCases(t *testing.T) {
 			name: "Malformed Content-Type",
 			setup: func() (*http.Request, interface{}) {
 				req := httptest.NewRequest("POST", "http://example.com/test", bytes.NewReader([]byte("{}")))
-				req.Header.Set("Content-Type", "invalid/content/type/format")
+				req.Header.Set(HeaderContentType, "invalid/content/type/format")
 				var result UserRequest
 				return req, &result
 			},
@@ -428,7 +428,7 @@ func TestParseRequest_JSON_Only(t *testing.T) {
 
 	jsonBytes, _ := json.Marshal(jsonData)
 	req := httptest.NewRequest("POST", "http://example.com/login", bytes.NewReader(jsonBytes))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(HeaderContentType, MIMEApplicationJSON)
 
 	var result FormOnlyRequest
 	err := ParseRequest(req, &result)
@@ -457,7 +457,7 @@ func TestParseRequest_Form_Only(t *testing.T) {
 	formData.Set("remember", "true")
 
 	req := httptest.NewRequest("POST", "http://example.com/login", strings.NewReader(formData.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(HeaderContentType, MIMEApplicationForm)
 
 	var result FormOnlyRequest
 	err := ParseRequest(req, &result)
@@ -501,7 +501,7 @@ func TestParseRequest_EmptyBody_WithQueryParams(t *testing.T) {
 
 func TestParseRequest_UnsupportedContentType(t *testing.T) {
 	req := httptest.NewRequest("POST", "http://example.com/test", bytes.NewReader([]byte("some data")))
-	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set(HeaderContentType, MIMETextPlain)
 
 	var result UserRequest
 	err := ParseRequest(req, &result)
@@ -517,7 +517,7 @@ func TestParseRequest_UnsupportedContentType(t *testing.T) {
 
 func TestParseRequest_EmptyJSON(t *testing.T) {
 	req := httptest.NewRequest("POST", "http://example.com/test", bytes.NewReader([]byte("")))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(HeaderContentType, MIMEApplicationJSON)
 
 	var result UserRequest
 	err := ParseRequest(req, &result)
@@ -529,7 +529,7 @@ func TestParseRequest_EmptyJSON(t *testing.T) {
 
 func TestParseRequest_InvalidJSON(t *testing.T) {
 	req := httptest.NewRequest("POST", "http://example.com/test", bytes.NewReader([]byte("{invalid json")))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(HeaderContentType, MIMEApplicationJSON)
 
 	var result UserRequest
 	err := ParseRequest(req, &result)

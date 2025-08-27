@@ -62,7 +62,7 @@ func ParseRequest(r *http.Request, target interface{}) erm.Error {
 	}
 
 	// Determine content type for body parsing
-	contentType := r.Header.Get("Content-Type")
+	contentType := r.Header.Get(HeaderContentType)
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err != nil && contentType != "" {
 		// If Content-Type header is malformed, treat as unsupported
