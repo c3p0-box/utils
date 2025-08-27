@@ -76,6 +76,7 @@ const (
 	MsgDuplicate    = "validation.duplicate"
 
 	// Negated validation message constants
+
 	MsgNotEmpty        = "validation.not_empty"
 	MsgNotEqualTo      = "validation.not_equal_to"
 	MsgNotMinLength    = "validation.not_min_length"
@@ -113,13 +114,16 @@ const (
 	MsgNotPrecision    = "validation.not_precision"
 
 	// Special validation message constants
+
 	MsgMustBeZero  = "validation.must_be_zero"
 	MsgDivisorZero = "validation.divisor_zero"
 
 	// Error message constants
+
 	MsgErrorMultiple       = "error.multiple"
 	MsgErrorNotFound       = "error.not_found"
 	MsgErrorInvalidRequest = "error.invalid_request"
+	MsgErrorInactive       = "error.inactive"
 )
 
 // Global internationalization state
@@ -514,6 +518,10 @@ func initializeMessages() {
 		},
 		MsgErrorInvalidRequest: {
 			Singular: "invalid request",
+			Plural:   "",
+		},
+		MsgErrorInactive: {
+			Singular: "{{.field}} is inactive",
 			Plural:   "",
 		},
 	}
