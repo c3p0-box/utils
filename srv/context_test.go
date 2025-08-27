@@ -166,6 +166,26 @@ func TestHttpContext_RequestInformation(t *testing.T) {
 			t.Error("Expected IsWebSocket to be true for WebSocket upgrade request")
 		}
 	})
+
+	t.Run("SetPath", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/original/path", nil)
+		rec := httptest.NewRecorder()
+		ctx := NewHttpContext(rec, req)
+
+		if ctx.Path() != "/original/path" {
+			t.Errorf("Expected initial path '/original/path', got '%s'", ctx.Path())
+		}
+
+		ctx.SetPath("/new/path")
+		if ctx.Path() != "/new/path" {
+			t.Errorf("Expected path to be '/new/path' after SetPath, got '%s'", ctx.Path())
+		}
+
+		// Ensure original request is not mutated
+		if req.URL.Path != "/original/path" {
+			t.Errorf("Expected original request path to be unchanged, got '%s'", req.URL.Path)
+		}
+	})
 }
 
 func TestHttpContext_Parameters(t *testing.T) {

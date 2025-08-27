@@ -46,6 +46,7 @@ type HttpContext struct {
 	mu             sync.RWMutex
 	values         map[string]interface{}
 	query          url.Values
+	path           string
 }
 
 // NewHttpContext creates a new HttpContext instance wrapping the provided
@@ -121,7 +122,16 @@ func (c *HttpContext) Method() string {
 
 // Path returns the URL path of the request.
 func (c *HttpContext) Path() string {
-	return c.Request().URL.Path
+	if c.path == "" {
+		c.path = c.Request().URL.Path
+	}
+
+	return c.path
+}
+
+// SetPath sets the URL path of the request.
+func (c *HttpContext) SetPath(path string) {
+	c.path = path
 }
 
 // ============================
