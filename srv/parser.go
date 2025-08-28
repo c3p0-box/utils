@@ -1,6 +1,7 @@
 package srv
 
 import (
+	"encoding"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -29,16 +30,28 @@ import (
 // - Form field mapping using `form` struct tags
 // - Query parameter mapping using `query` struct tags
 // - Type conversion for form and query values (string, int, bool, etc.)
+// - Custom type support for types implementing encoding.TextUnmarshaler interface
 // - Proper error handling with erm.Error types
 // - Resource leak prevention with automatic cleanup
 // - Combined parsing: both request body and query parameters in single call
 //
 // Example usage:
 //
+//	type UserID [16]byte
+//
+//	func (u *UserID) UnmarshalText(text []byte) error {
+//		if len(text) != 32 { // hex encoded 16 bytes
+//			return errors.New("invalid UserID length")
+//		}
+//		_, err := hex.Decode(u[:], text)
+//		return err
+//	}
+//
 //	type CreateUserRequest struct {
 //		Name     string `json:"name" form:"name"`
 //		Email    string `json:"email" form:"email"`
 //		Age      int    `json:"age" form:"age"`
+//		UserID   UserID `form:"user_id" query:"user_id"`  // Custom type with TextUnmarshaler
 //		Page     int    `query:"page"`
 //		Sort     string `query:"sort"`
 //		FilterBy string `query:"filter_by"`
@@ -50,7 +63,7 @@ import (
 //		return err
 //	}
 //	// Use req.Name, req.Email, req.Age (from body)
-//	// Use req.Page, req.Sort, req.FilterBy (from query parameters)
+//	// Use req.UserID (parsed via UnmarshalText), req.Page, req.Sort, req.FilterBy (from query parameters)
 func ParseRequest(r *http.Request, target interface{}) erm.Error {
 	if r == nil {
 		return erm.NewValidationError(erm.MsgErrorInvalidRequest, erm.NonFieldErrors, "", "")
@@ -277,8 +290,50 @@ func mapFormToStruct(values map[string][]string, target interface{}) erm.Error {
 	return nil
 }
 
+// getTextUnmarshaler checks if a reflect.Value implements encoding.TextUnmarshaler
+// and returns the unmarshaler interface, or nil if not supported
+func getTextUnmarshaler(field reflect.Value) encoding.TextUnmarshaler {
+	// For pointer types
+	if field.Kind() == reflect.Ptr {
+		// Ensure pointer is not nil
+		if field.IsNil() && field.CanSet() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+
+		// Check if the pointer value implements TextUnmarshaler
+		if !field.IsNil() && field.CanInterface() {
+			if unmarshaler, ok := field.Interface().(encoding.TextUnmarshaler); ok {
+				return unmarshaler
+			}
+		}
+	} else {
+		// For non-pointer types, check if the value directly implements TextUnmarshaler
+		if field.CanInterface() {
+			if unmarshaler, ok := field.Interface().(encoding.TextUnmarshaler); ok {
+				return unmarshaler
+			}
+		}
+
+		// Check if a pointer to this value implements TextUnmarshaler
+		if field.CanAddr() {
+			if unmarshaler, ok := field.Addr().Interface().(encoding.TextUnmarshaler); ok {
+				return unmarshaler
+			}
+		}
+	}
+
+	return nil
+}
+
 // setFieldValue sets a struct field value from a string form value
+// Supports basic types (string, int, bool, float) and custom types implementing encoding.TextUnmarshaler
 func setFieldValue(field reflect.Value, value string) error {
+	// Try to use TextUnmarshaler interface first
+	if unmarshaler := getTextUnmarshaler(field); unmarshaler != nil {
+		return unmarshaler.UnmarshalText([]byte(value))
+	}
+
+	// Fall back to basic type handling
 	switch field.Kind() {
 	case reflect.String:
 		field.SetString(value)

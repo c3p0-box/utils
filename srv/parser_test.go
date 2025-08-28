@@ -2,13 +2,17 @@ package srv
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Test structures for various parsing scenarios
@@ -40,6 +44,85 @@ type FormOnlyRequest struct {
 	Username string `form:"username"`
 	Password string `form:"password"`
 	Remember bool   `form:"remember"`
+}
+
+// Custom types implementing encoding.TextUnmarshaler for testing
+
+// UserID represents a 16-byte user identifier
+type UserID [16]byte
+
+func (u *UserID) UnmarshalText(text []byte) error {
+	if len(text) != 32 { // hex encoded 16 bytes = 32 characters
+		return fmt.Errorf("invalid UserID length: expected 32, got %d", len(text))
+	}
+	_, err := hex.Decode(u[:], text)
+	return err
+}
+
+func (u UserID) String() string {
+	return hex.EncodeToString(u[:])
+}
+
+// CustomTime represents a custom time format
+type CustomTime time.Time
+
+func (ct *CustomTime) UnmarshalText(text []byte) error {
+	t, err := time.Parse("2006-01-02", string(text))
+	if err != nil {
+		return err
+	}
+	*ct = CustomTime(t)
+	return nil
+}
+
+func (ct CustomTime) String() string {
+	return time.Time(ct).Format("2006-01-02")
+}
+
+// CustomInt wraps an int with custom parsing logic
+type CustomInt int
+
+func (ci *CustomInt) UnmarshalText(text []byte) error {
+	s := string(text)
+	if s == "zero" {
+		*ci = 0
+		return nil
+	}
+	if s == "one" {
+		*ci = 1
+		return nil
+	}
+	return fmt.Errorf("unsupported CustomInt value: %s", s)
+}
+
+// PointerReceiver demonstrates a type that implements TextUnmarshaler only on pointer receiver
+type PointerReceiver string
+
+func (pr *PointerReceiver) UnmarshalText(text []byte) error {
+	s := string(text)
+	if s == "" {
+		return errors.New("empty string not allowed")
+	}
+	*pr = PointerReceiver("parsed:" + s)
+	return nil
+}
+
+// TestRequestWithCustomTypes includes various custom types for comprehensive testing
+type TestRequestWithCustomTypes struct {
+	// Form/Query fields with custom types
+	ID          UserID          `form:"id" query:"id"`
+	CreatedAt   CustomTime      `form:"created_at" query:"created_at"`
+	Priority    CustomInt       `form:"priority" query:"priority"`
+	PtrReceiver PointerReceiver `form:"ptr_receiver" query:"ptr_receiver"`
+
+	// Pointer versions
+	IDPtr        *UserID     `form:"id_ptr" query:"id_ptr"`
+	CreatedAtPtr *CustomTime `form:"created_at_ptr" query:"created_at_ptr"`
+	PriorityPtr  *CustomInt  `form:"priority_ptr" query:"priority_ptr"`
+
+	// Regular fields for comparison
+	Name  string `form:"name" query:"name"`
+	Count int    `form:"count" query:"count"`
 }
 
 func TestParseRequest_QueryParams_Basic(t *testing.T) {
@@ -604,5 +687,272 @@ func TestMapQueryToStruct_SkipUnexportedFields(t *testing.T) {
 	}
 	if result.privateVal != 0 {
 		t.Errorf("privateVal should remain 0 (unexported), got %v", result.privateVal)
+	}
+}
+
+func TestParseRequest_TextUnmarshaler_QueryParams(t *testing.T) {
+	tests := []struct {
+		name        string
+		queryParams string
+		want        TestRequestWithCustomTypes
+		wantErr     bool
+		errMsg      string
+	}{
+		{
+			name:        "Valid custom types in query parameters",
+			queryParams: "id=0123456789abcdef0123456789abcdef&created_at=2023-12-25&priority=one&ptr_receiver=test&name=John&count=42",
+			want: TestRequestWithCustomTypes{
+				ID: func() UserID {
+					var id UserID
+					_, _ = hex.Decode(id[:], []byte("0123456789abcdef0123456789abcdef"))
+					return id
+				}(),
+				CreatedAt:   CustomTime(time.Date(2023, 12, 25, 0, 0, 0, 0, time.UTC)),
+				Priority:    CustomInt(1),
+				PtrReceiver: PointerReceiver("parsed:test"),
+				Name:        "John",
+				Count:       42,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "Valid custom types with pointers",
+			queryParams: "id_ptr=fedcba9876543210fedcba9876543210&created_at_ptr=2024-01-01&priority_ptr=zero",
+			want: TestRequestWithCustomTypes{
+				IDPtr: func() *UserID {
+					var id UserID
+					_, _ = hex.Decode(id[:], []byte("fedcba9876543210fedcba9876543210"))
+					return &id
+				}(),
+				CreatedAtPtr: func() *CustomTime { ct := CustomTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)); return &ct }(),
+				PriorityPtr:  func() *CustomInt { ci := CustomInt(0); return &ci }(),
+			},
+			wantErr: false,
+		},
+		{
+			name:        "Invalid UserID format",
+			queryParams: "id=invalid_hex",
+			wantErr:     true,
+			errMsg:      "invalid request",
+		},
+		{
+			name:        "Invalid UserID length",
+			queryParams: "id=123",
+			wantErr:     true,
+			errMsg:      "invalid request",
+		},
+		{
+			name:        "Invalid date format",
+			queryParams: "created_at=invalid-date",
+			wantErr:     true,
+			errMsg:      "invalid request",
+		},
+		{
+			name:        "Invalid CustomInt value",
+			queryParams: "priority=invalid",
+			wantErr:     true,
+			errMsg:      "invalid request",
+		},
+		{
+			name:        "Empty PointerReceiver (should fail)",
+			queryParams: "ptr_receiver=",
+			wantErr:     true,
+			errMsg:      "invalid request",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "http://example.com/test?"+tt.queryParams, nil)
+
+			var result TestRequestWithCustomTypes
+			err := ParseRequest(req, &result)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseRequest() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr {
+				if err != nil && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Error message should contain %q, got %q", tt.errMsg, err.Error())
+				}
+				return
+			}
+
+			// Validate results for successful cases
+			if result.ID != tt.want.ID {
+				t.Errorf("ID = %v, want %v", result.ID, tt.want.ID)
+			}
+			if result.CreatedAt != tt.want.CreatedAt {
+				t.Errorf("CreatedAt = %v, want %v", result.CreatedAt, tt.want.CreatedAt)
+			}
+			if result.Priority != tt.want.Priority {
+				t.Errorf("Priority = %v, want %v", result.Priority, tt.want.Priority)
+			}
+			if result.PtrReceiver != tt.want.PtrReceiver {
+				t.Errorf("PtrReceiver = %v, want %v", result.PtrReceiver, tt.want.PtrReceiver)
+			}
+			if result.Name != tt.want.Name {
+				t.Errorf("Name = %v, want %v", result.Name, tt.want.Name)
+			}
+			if result.Count != tt.want.Count {
+				t.Errorf("Count = %v, want %v", result.Count, tt.want.Count)
+			}
+
+			// Check pointer fields
+			if tt.want.IDPtr != nil {
+				if result.IDPtr == nil {
+					t.Errorf("IDPtr should not be nil")
+				} else if *result.IDPtr != *tt.want.IDPtr {
+					t.Errorf("IDPtr = %v, want %v", *result.IDPtr, *tt.want.IDPtr)
+				}
+			}
+			if tt.want.CreatedAtPtr != nil {
+				if result.CreatedAtPtr == nil {
+					t.Errorf("CreatedAtPtr should not be nil")
+				} else if *result.CreatedAtPtr != *tt.want.CreatedAtPtr {
+					t.Errorf("CreatedAtPtr = %v, want %v", *result.CreatedAtPtr, *tt.want.CreatedAtPtr)
+				}
+			}
+			if tt.want.PriorityPtr != nil {
+				if result.PriorityPtr == nil {
+					t.Errorf("PriorityPtr should not be nil")
+				} else if *result.PriorityPtr != *tt.want.PriorityPtr {
+					t.Errorf("PriorityPtr = %v, want %v", *result.PriorityPtr, *tt.want.PriorityPtr)
+				}
+			}
+		})
+	}
+}
+
+func TestParseRequest_TextUnmarshaler_FormData(t *testing.T) {
+	// Test form data parsing with custom types
+	formData := url.Values{}
+	formData.Set("id", "0123456789abcdef0123456789abcdef")
+	formData.Set("created_at", "2023-06-15")
+	formData.Set("priority", "one")
+	formData.Set("ptr_receiver", "form_test")
+	formData.Set("name", "Jane")
+	formData.Set("count", "99")
+
+	req := httptest.NewRequest("POST", "http://example.com/test", strings.NewReader(formData.Encode()))
+	req.Header.Set(HeaderContentType, MIMEApplicationForm)
+
+	var result TestRequestWithCustomTypes
+	err := ParseRequest(req, &result)
+
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	// Verify custom types were parsed correctly
+	expectedID := UserID{}
+	_, _ = hex.Decode(expectedID[:], []byte("0123456789abcdef0123456789abcdef"))
+	if result.ID != expectedID {
+		t.Errorf("ID = %v, want %v", result.ID, expectedID)
+	}
+
+	expectedTime := CustomTime(time.Date(2023, 6, 15, 0, 0, 0, 0, time.UTC))
+	if result.CreatedAt != expectedTime {
+		t.Errorf("CreatedAt = %v, want %v", result.CreatedAt, expectedTime)
+	}
+
+	if result.Priority != CustomInt(1) {
+		t.Errorf("Priority = %v, want %v", result.Priority, CustomInt(1))
+	}
+
+	if result.PtrReceiver != PointerReceiver("parsed:form_test") {
+		t.Errorf("PtrReceiver = %v, want %v", result.PtrReceiver, PointerReceiver("parsed:form_test"))
+	}
+
+	// Verify regular fields still work
+	if result.Name != "Jane" {
+		t.Errorf("Name = %v, want Jane", result.Name)
+	}
+	if result.Count != 99 {
+		t.Errorf("Count = %v, want 99", result.Count)
+	}
+}
+
+func TestParseRequest_TextUnmarshaler_MultipartForm(t *testing.T) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	// Add form fields with custom types
+	_ = writer.WriteField("id", "abcdef0123456789abcdef0123456789")
+	_ = writer.WriteField("created_at", "2024-03-10")
+	_ = writer.WriteField("priority", "zero")
+	_ = writer.WriteField("ptr_receiver", "multipart_test")
+	_ = writer.WriteField("name", "Bob")
+	_ = writer.WriteField("count", "75")
+	_ = writer.Close()
+
+	req := httptest.NewRequest("POST", "http://example.com/test", &buf)
+	req.Header.Set(HeaderContentType, writer.FormDataContentType())
+
+	var result TestRequestWithCustomTypes
+	err := ParseRequest(req, &result)
+
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	// Verify custom types were parsed correctly
+	expectedID := UserID{}
+	_, _ = hex.Decode(expectedID[:], []byte("abcdef0123456789abcdef0123456789"))
+	if result.ID != expectedID {
+		t.Errorf("ID = %v, want %v", result.ID, expectedID)
+	}
+
+	expectedTime := CustomTime(time.Date(2024, 3, 10, 0, 0, 0, 0, time.UTC))
+	if result.CreatedAt != expectedTime {
+		t.Errorf("CreatedAt = %v, want %v", result.CreatedAt, expectedTime)
+	}
+
+	if result.Priority != CustomInt(0) {
+		t.Errorf("Priority = %v, want %v", result.Priority, CustomInt(0))
+	}
+
+	if result.PtrReceiver != PointerReceiver("parsed:multipart_test") {
+		t.Errorf("PtrReceiver = %v, want %v", result.PtrReceiver, PointerReceiver("parsed:multipart_test"))
+	}
+}
+
+func TestParseRequest_TextUnmarshaler_CombinedWithJSON(t *testing.T) {
+	// Test combining JSON body with query parameters containing custom types
+	jsonData := map[string]interface{}{
+		"name":  "Alice",
+		"count": 123,
+	}
+
+	jsonBytes, _ := json.Marshal(jsonData)
+	req := httptest.NewRequest("POST", "http://example.com/test?id=1234567890abcdef1234567890abcdef&priority=one", bytes.NewReader(jsonBytes))
+	req.Header.Set(HeaderContentType, MIMEApplicationJSON)
+
+	var result TestRequestWithCustomTypes
+	err := ParseRequest(req, &result)
+
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	// Check JSON fields
+	if result.Name != "Alice" {
+		t.Errorf("Name = %v, want Alice", result.Name)
+	}
+	if result.Count != 123 {
+		t.Errorf("Count = %v, want 123", result.Count)
+	}
+
+	// Check query parameters with custom types
+	expectedID := UserID{}
+	_, _ = hex.Decode(expectedID[:], []byte("1234567890abcdef1234567890abcdef"))
+	if result.ID != expectedID {
+		t.Errorf("ID = %v, want %v", result.ID, expectedID)
+	}
+
+	if result.Priority != CustomInt(1) {
+		t.Errorf("Priority = %v, want %v", result.Priority, CustomInt(1))
 	}
 }

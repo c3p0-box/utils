@@ -5,7 +5,7 @@ The `srv` package provides comprehensive HTTP server utilities for Go applicatio
 ## Features
 
 - **🛠️ HTTP Context**: Convenient request/response wrapper with value storage
-- **📦 Request Parsing**: Universal parsing of JSON, form data, and query parameters with struct tags
+- **📦 Request Parsing**: Universal parsing of JSON, form data, and query parameters with struct tags and custom type support
 - **🔀 Enhanced Router**: Extended ServeMux with RESTful HTTP method helpers
 - **🔄 URL Reversing**: Named routes with automatic URL generation and parameter substitution
 - **🔗 Middleware System**: Composable HTTP middleware with easy chaining
@@ -213,10 +213,22 @@ func ParseRequest(r *http.Request, target interface{}) erm.Error
 - `string`, `int`, `int8`, `int16`, `int32`, `int64`
 - `uint`, `uint8`, `uint16`, `uint32`, `uint64`
 - `float32`, `float64`, `bool`
+- Custom types implementing `encoding.TextUnmarshaler` interface
 
 #### Basic Usage
 
 ```go
+// Custom type example
+type UserID [16]byte
+
+func (u *UserID) UnmarshalText(text []byte) error {
+    if len(text) != 32 {
+        return fmt.Errorf("invalid UserID length")
+    }
+    _, err := hex.Decode(u[:], text)
+    return err
+}
+
 type UserRequest struct {
     // JSON/Form body fields
     Name     string  `json:"name" form:"name"`
@@ -224,7 +236,8 @@ type UserRequest struct {
     Age      int     `json:"age" form:"age"`
     Active   bool    `json:"active" form:"active"`
     
-    // Query parameters
+    // Query parameters (including custom types)
+    ID       UserID  `query:"user_id"`    // Custom type with TextUnmarshaler
     Page     int     `query:"page"`
     Sort     string  `query:"sort"`
     Limit    int     `query:"limit"`
@@ -351,6 +364,168 @@ func uploadHandler(ctx *srv.HttpContext) error {
 }
 ```
 
+#### Custom Types with TextUnmarshaler
+
+ParseRequest supports custom types that implement the `encoding.TextUnmarshaler` interface, allowing you to parse complex data types from form and query parameters.
+
+```go
+import (
+    "encoding"
+    "encoding/hex"
+    "fmt"
+    "time"
+)
+
+// Custom 16-byte user identifier
+type UserID [16]byte
+
+func (u *UserID) UnmarshalText(text []byte) error {
+    if len(text) != 32 { // hex encoded 16 bytes = 32 characters
+        return fmt.Errorf("invalid UserID length: expected 32, got %d", len(text))
+    }
+    _, err := hex.Decode(u[:], text)
+    return err
+}
+
+func (u UserID) String() string {
+    return hex.EncodeToString(u[:])
+}
+
+// Custom time format
+type CustomDate time.Time
+
+func (cd *CustomDate) UnmarshalText(text []byte) error {
+    t, err := time.Parse("2006-01-02", string(text))
+    if err != nil {
+        return err
+    }
+    *cd = CustomDate(t)
+    return nil
+}
+
+func (cd CustomDate) String() string {
+    return time.Time(cd).Format("2006-01-02")
+}
+
+// Custom enum-like type
+type Priority int
+
+const (
+    PriorityLow Priority = iota
+    PriorityMedium
+    PriorityHigh
+)
+
+func (p *Priority) UnmarshalText(text []byte) error {
+    switch string(text) {
+    case "low":
+        *p = PriorityLow
+    case "medium":
+        *p = PriorityMedium
+    case "high":
+        *p = PriorityHigh
+    default:
+        return fmt.Errorf("invalid priority: %s", string(text))
+    }
+    return nil
+}
+
+// Usage in request struct
+type TaskRequest struct {
+    // Custom types in form/query parameters
+    UserID      UserID     `form:"user_id" query:"user_id"`
+    DueDate     CustomDate `form:"due_date" query:"due_date"`
+    Priority    Priority   `form:"priority" query:"priority"`
+    
+    // Pointer versions (automatically handled)
+    AssigneeID  *UserID     `form:"assignee_id" query:"assignee_id"`
+    StartDate   *CustomDate `form:"start_date" query:"start_date"`
+    
+    // Regular fields
+    Title       string `json:"title" form:"title"`
+    Description string `json:"description" form:"description"`
+}
+
+func createTaskHandler(ctx *srv.HttpContext) error {
+    var req TaskRequest
+    if err := srv.ParseRequest(ctx.Request(), &req); err != nil {
+        return err // Automatic error handling for invalid formats
+    }
+    
+    // All custom types are automatically parsed
+    log.Printf("Creating task for user %s, due %s, priority %d", 
+        req.UserID.String(), req.DueDate.String(), req.Priority)
+    
+    return ctx.JSON(201, map[string]interface{}{
+        "message":    "Task created successfully",
+        "user_id":    req.UserID.String(),
+        "due_date":   req.DueDate.String(),
+        "priority":   req.Priority,
+        "assignee":   req.AssigneeID, // nil if not provided
+    })
+}
+```
+
+**Example Requests:**
+
+Form Data:
+```bash
+POST /tasks
+Content-Type: application/x-www-form-urlencoded
+
+user_id=0123456789abcdef0123456789abcdef&due_date=2024-12-25&priority=high&title=Complete+project
+```
+
+Query Parameters:
+```bash
+GET /tasks?user_id=fedcba9876543210fedcba9876543210&due_date=2024-01-15&priority=medium
+```
+
+Multipart Form:
+```bash
+POST /tasks
+Content-Type: multipart/form-data
+
+user_id: abcdef0123456789abcdef0123456789
+due_date: 2024-06-30
+priority: low
+title: Review documentation
+description: Review and update project documentation
+```
+
+JSON with Query Parameters:
+```bash
+POST /tasks?user_id=1234567890abcdef1234567890abcdef&priority=high
+Content-Type: application/json
+
+{
+  "title": "Fix bug #123",
+  "description": "Critical security fix"
+}
+```
+
+**Error Handling:**
+
+Custom types can return specific errors that are automatically handled:
+
+```go
+type ProductCode string
+
+func (pc *ProductCode) UnmarshalText(text []byte) error {
+    s := string(text)
+    if len(s) < 3 {
+        return fmt.Errorf("product code too short: minimum 3 characters")
+    }
+    if !strings.HasPrefix(s, "PRD-") {
+        return fmt.Errorf("product code must start with 'PRD-'")
+    }
+    *pc = ProductCode(s)
+    return nil
+}
+
+// Invalid product codes in form/query will return 400 Bad Request
+```
+
 #### Advanced Tag Usage
 
 ```go
@@ -427,13 +602,14 @@ func handlerWithValidation(ctx *srv.HttpContext) error {
 #### Type Conversion Examples
 
 ```go
-// URL: /api/users?page=5&active=true&score=95.5&tags=
+// URL: /api/users?page=5&active=true&score=95.5&tags=&user_id=1234567890abcdef1234567890abcdef
 
 type TypeExampleRequest struct {
     Page    int     `query:"page"`    // "5" -> 5
     Active  bool    `query:"active"`  // "true" -> true
     Score   float64 `query:"score"`   // "95.5" -> 95.5
     Tags    string  `query:"tags"`    // "" -> "" (empty string)
+    UserID  UserID  `query:"user_id"` // "1234567890abcdef1234567890abcdef" -> UserID via UnmarshalText
     Missing int     `query:"missing"` // (not provided) -> 0 (zero value)
 }
 ```
@@ -461,7 +637,21 @@ if err := srv.ParseRequest(ctx.Request(), &req); err != nil {
 }
 ```
 
-4. **Documentation**: Document expected parameters
+4. **Custom Types**: Implement TextUnmarshaler for complex parsing
+```go
+type ProductID string
+
+func (p *ProductID) UnmarshalText(text []byte) error {
+    s := string(text)
+    if !strings.HasPrefix(s, "prod_") {
+        return fmt.Errorf("invalid product ID format")
+    }
+    *p = ProductID(s)
+    return nil
+}
+```
+
+5. **Documentation**: Document expected parameters
 ```go
 // UserListRequest handles GET /users?page=N&sort=field&limit=N
 type UserListRequest struct {
