@@ -313,7 +313,10 @@ func (e *StackError) Unwrap() error {
 	if e == nil {
 		return nil
 	}
-	return e.root
+	if e.root != nil {
+		return e.root
+	}
+	return e
 }
 
 // Stack returns the captured stack trace as program counters.

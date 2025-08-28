@@ -173,6 +173,9 @@ func TestStackErrorMethods(t *testing.T) {
 	if errNoRoot.Error() != "test" {
 		t.Fatalf("Error() = %q, want %q", errNoRoot.Error(), "test")
 	}
+	if errNoRoot.Unwrap() != errNoRoot {
+		t.Fatal("Unwrap() should return the error itself when there is no root")
+	}
 }
 
 // TestStackError_WithRootError tests the WithRootError method
@@ -973,8 +976,11 @@ func TestNotFound(t *testing.T) {
 			t.Fatalf("Status() = %d, want %d", Status(err), http.StatusNotFound)
 		}
 
-		if errors.Unwrap(err) != nil {
-			t.Fatal("Unwrap should return nil when created with nil error")
+		if errors.Unwrap(err) == nil {
+			t.Fatal("Unwrap should return self when created with nil error")
+		}
+		if err.Unwrap().Error() != "resource is not found" {
+			t.Fatal("Unwrapped error should return self which did not match")
 		}
 	})
 }
