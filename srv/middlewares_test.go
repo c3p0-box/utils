@@ -157,22 +157,362 @@ func TestCORSMiddleware_DefaultConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("CORS headers set for regular requests", func(t *testing.T) {
+	t.Run("without origin header", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		// Still should set Vary header
+		if rec.Header().Get("Vary") != "Origin" {
+			t.Errorf("Expected Vary header to include 'Origin', got '%s'", rec.Header().Get("Vary"))
+		}
+
+		// Should not set CORS headers when no origin
+		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Errorf("Expected no Access-Control-Allow-Origin header without origin, got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+
+		if rec.Body.String() != "success" {
+			t.Errorf("Expected body 'success', got '%s'", rec.Body.String())
+		}
+	})
+}
+
+func TestCORSMiddleware_PreflightRequests(t *testing.T) {
+	mux := NewMux()
+
+	// Custom CORS config for testing
+	corsConfig := CORSConfig{
+		AllowOrigins:     []string{"https://example.com", "https://trusted.com"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
+		ExposeHeaders:    []string{"X-Total-Count", "X-Page"},
+		MaxAge:           3600,
+	}
+	mux.Middleware(CORSMiddleware(corsConfig))
+
+	// Register both POST and OPTIONS routes to handle preflight properly
+	mux.Post("", "/api/users", func(ctx Context) error {
+		return ctx.JSON(200, map[string]string{"message": "created"})
+	})
+	mux.Options("", "/api/users", func(ctx Context) error {
+		// This handler is needed for preflight to work with HandlerFunc middleware
+		return nil // The middleware will handle the response
+	})
+
+	t.Run("preflight with allowed origin", func(t *testing.T) {
+		req := httptest.NewRequest("OPTIONS", "/api/users", nil)
+		req.Header.Set("Origin", "https://example.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "Content-Type,Authorization")
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		// Check preflight response
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("Expected status 204, got %d", rec.Code)
+		}
+
+		if rec.Header().Get("Access-Control-Allow-Origin") != "https://example.com" {
+			t.Errorf("Expected Access-Control-Allow-Origin to be 'https://example.com', got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+		}
+
+		if rec.Header().Get("Access-Control-Allow-Methods") != "GET, POST, PUT, DELETE, OPTIONS" {
+			t.Errorf("Expected Access-Control-Allow-Methods, got '%s'", rec.Header().Get("Access-Control-Allow-Methods"))
+		}
+
+		if rec.Header().Get("Access-Control-Allow-Headers") != "Content-Type, Authorization" {
+			t.Errorf("Expected Access-Control-Allow-Headers, got '%s'", rec.Header().Get("Access-Control-Allow-Headers"))
+		}
+
+		if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
+			t.Errorf("Expected Access-Control-Allow-Credentials to be 'true', got '%s'", rec.Header().Get("Access-Control-Allow-Credentials"))
+		}
+
+		if rec.Header().Get("Access-Control-Max-Age") != "3600" {
+			t.Errorf("Expected Access-Control-Max-Age to be '3600', got '%s'", rec.Header().Get("Access-Control-Max-Age"))
+		}
+
+		// Check Vary headers for preflight
+		varyHeaders := rec.Header().Values("Vary")
+		expectedVary := []string{"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"}
+		for _, expected := range expectedVary {
+			found := false
+			for _, vary := range varyHeaders {
+				if vary == expected {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected Vary header to include '%s', got %v", expected, varyHeaders)
+			}
+		}
+	})
+
+	t.Run("preflight with rejected origin", func(t *testing.T) {
+		req := httptest.NewRequest("OPTIONS", "/api/users", nil)
+		req.Header.Set("Origin", "https://malicious.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		// Should still return 204 but without CORS headers
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("Expected status 204, got %d", rec.Code)
+		}
+
+		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Errorf("Expected no Access-Control-Allow-Origin for rejected origin, got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+		}
+	})
+
+	t.Run("preflight without origin", func(t *testing.T) {
+		req := httptest.NewRequest("OPTIONS", "/api/users", nil)
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		// Should return 204 without CORS headers
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("Expected status 204, got %d", rec.Code)
+		}
+
+		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Errorf("Expected no Access-Control-Allow-Origin without origin, got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+		}
+	})
+
+	t.Run("preflight with dynamic headers", func(t *testing.T) {
+		// Test config without AllowHeaders to test dynamic header echoing
+		dynamicConfig := CORSConfig{
+			AllowOrigins: []string{"https://example.com"},
+			AllowMethods: []string{"GET", "POST", "OPTIONS"},
+			// No AllowHeaders - should echo requested headers
+		}
+		mux2 := NewMux()
+		mux2.Middleware(CORSMiddleware(dynamicConfig))
+		mux2.Post("", "/test", func(ctx Context) error {
+			return ctx.String(200, "ok")
+		})
+		mux2.Options("", "/test", func(ctx Context) error {
+			return nil // Middleware handles the response
+		})
+
+		req := httptest.NewRequest("OPTIONS", "/test", nil)
+		req.Header.Set("Origin", "https://example.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "X-Custom-Header,Content-Type")
+		rec := httptest.NewRecorder()
+
+		mux2.ServeHTTP(rec, req)
+
+		// Should echo the requested headers
+		if rec.Header().Get("Access-Control-Allow-Headers") != "X-Custom-Header,Content-Type" {
+			t.Errorf("Expected echoed headers, got '%s'", rec.Header().Get("Access-Control-Allow-Headers"))
+		}
+	})
+}
+
+func TestCORSMiddleware_CredentialsHandling(t *testing.T) {
+	t.Run("credentials with wildcard origin", func(t *testing.T) {
+		// Test that wildcard with credentials returns specific origin
+		config := CORSConfig{
+			AllowOrigins:     []string{"*"},
+			AllowCredentials: true,
+		}
+		mux := NewMux()
+		mux.Middleware(CORSMiddleware(config))
+		mux.Get("", "/test", func(ctx Context) error {
+			return ctx.String(200, "ok")
+		})
+
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.Header.Set("Origin", "https://example.com")
 		rec := httptest.NewRecorder()
 
 		mux.ServeHTTP(rec, req)
 
-		// CORS headers should be set
-		if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
-			t.Errorf("Expected Access-Control-Allow-Origin to be '*', got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+		// With credentials = true and wildcard, should echo specific origin
+		if rec.Header().Get("Access-Control-Allow-Origin") != "https://example.com" {
+			t.Errorf("Expected specific origin with credentials, got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
 		}
 
-		if rec.Code != http.StatusOK {
-			t.Errorf("Expected status 200, got %d", rec.Code)
+		if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
+			t.Errorf("Expected Access-Control-Allow-Credentials to be 'true', got '%s'", rec.Header().Get("Access-Control-Allow-Credentials"))
 		}
 	})
+
+	t.Run("credentials with specific origins", func(t *testing.T) {
+		config := CORSConfig{
+			AllowOrigins:     []string{"https://trusted.com"},
+			AllowCredentials: true,
+		}
+		mux := NewMux()
+		mux.Middleware(CORSMiddleware(config))
+		mux.Get("", "/test", func(ctx Context) error {
+			return ctx.String(200, "ok")
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set("Origin", "https://trusted.com")
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if rec.Header().Get("Access-Control-Allow-Origin") != "https://trusted.com" {
+			t.Errorf("Expected specific origin, got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+		}
+
+		if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
+			t.Errorf("Expected credentials header, got '%s'", rec.Header().Get("Access-Control-Allow-Credentials"))
+		}
+	})
+
+	t.Run("no credentials", func(t *testing.T) {
+		config := CORSConfig{
+			AllowOrigins:     []string{"*"},
+			AllowCredentials: false,
+		}
+		mux := NewMux()
+		mux.Middleware(CORSMiddleware(config))
+		mux.Get("", "/test", func(ctx Context) error {
+			return ctx.String(200, "ok")
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set("Origin", "https://example.com")
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+			t.Errorf("Expected wildcard without credentials, got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+		}
+
+		if rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+			t.Errorf("Expected no credentials header, got '%s'", rec.Header().Get("Access-Control-Allow-Credentials"))
+		}
+	})
+}
+
+func TestCORSMiddleware_OriginValidation(t *testing.T) {
+	config := CORSConfig{
+		AllowOrigins: []string{"https://example.com", "https://sub.example.com"},
+		AllowMethods: []string{"GET", "POST"},
+	}
+	mux := NewMux()
+	mux.Middleware(CORSMiddleware(config))
+	mux.Get("", "/test", func(ctx Context) error {
+		return ctx.String(200, "ok")
+	})
+
+	testCases := []struct {
+		name           string
+		origin         string
+		expectAllowed  bool
+		expectedOrigin string
+	}{
+		{
+			name:           "allowed origin 1",
+			origin:         "https://example.com",
+			expectAllowed:  true,
+			expectedOrigin: "https://example.com",
+		},
+		{
+			name:           "allowed origin 2",
+			origin:         "https://sub.example.com",
+			expectAllowed:  true,
+			expectedOrigin: "https://sub.example.com",
+		},
+		{
+			name:          "rejected origin",
+			origin:        "https://malicious.com",
+			expectAllowed: false,
+		},
+		{
+			name:          "similar but different origin",
+			origin:        "https://example.com.malicious.com",
+			expectAllowed: false,
+		},
+		{
+			name:          "subdomain not in list",
+			origin:        "https://other.example.com",
+			expectAllowed: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.Header.Set("Origin", tc.origin)
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if tc.expectAllowed {
+				if rec.Header().Get("Access-Control-Allow-Origin") != tc.expectedOrigin {
+					t.Errorf("Expected Access-Control-Allow-Origin '%s', got '%s'", tc.expectedOrigin, rec.Header().Get("Access-Control-Allow-Origin"))
+				}
+			} else {
+				if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+					t.Errorf("Expected no Access-Control-Allow-Origin for rejected origin, got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+				}
+			}
+
+			// Request should still succeed (CORS is client-side enforcement)
+			if rec.Code != 200 {
+				t.Errorf("Expected status 200, got %d", rec.Code)
+			}
+		})
+	}
+}
+
+func TestCORSMiddleware_ExposeHeaders(t *testing.T) {
+	config := CORSConfig{
+		AllowOrigins:  []string{"*"},
+		ExposeHeaders: []string{"X-Total-Count", "X-Page-Number", "X-Custom"},
+	}
+	mux := NewMux()
+	mux.Middleware(CORSMiddleware(config))
+	mux.Get("", "/test", func(ctx Context) error {
+		// Set custom headers to test expose
+		ctx.SetHeader("X-Total-Count", "100")
+		ctx.SetHeader("X-Page-Number", "1")
+		ctx.SetHeader("X-Custom", "value")
+		return ctx.String(200, "ok")
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "https://example.com")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	expectedExposeHeaders := "X-Total-Count, X-Page-Number, X-Custom"
+	if rec.Header().Get("Access-Control-Expose-Headers") != expectedExposeHeaders {
+		t.Errorf("Expected Access-Control-Expose-Headers '%s', got '%s'", expectedExposeHeaders, rec.Header().Get("Access-Control-Expose-Headers"))
+	}
+
+	// Should not expose headers for preflight
+	req2 := httptest.NewRequest("OPTIONS", "/test", nil)
+	req2.Header.Set("Origin", "https://example.com")
+	req2.Header.Set("Access-Control-Request-Method", "GET")
+	rec2 := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec2, req2)
+
+	if rec2.Header().Get("Access-Control-Expose-Headers") != "" {
+		t.Errorf("Expected no expose headers for preflight, got '%s'", rec2.Header().Get("Access-Control-Expose-Headers"))
+	}
 }
 
 func TestAddTrailingSlashMiddleware_DefaultConfig(t *testing.T) {

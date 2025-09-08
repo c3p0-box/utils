@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -114,17 +115,50 @@ func RecoverMiddleware(next HandlerFunc) HandlerFunc {
 	}
 }
 
-// CORSMiddleware returns a HandlerFunc-based CORS middleware with the provided configuration.
-// It works directly with the Context interface and maintains the elegant error handling pattern.
+// CORSMiddleware returns a HandlerFunc-based CORS middleware that handles Cross-Origin Resource
+// Sharing (CORS) according to the W3C specification. It supports both simple and preflight
+// requests with comprehensive configuration options for security and compatibility.
 //
-// Note: For proper CORS support with preflight requests, consider using the http.Handler
-// version CORS() middleware instead, as HandlerFunc middleware cannot fully handle
-// OPTIONS requests that don't match registered routes.
+// Features:
+//   - Origin validation with exact matching or wildcard support
+//   - Preflight request handling for complex CORS scenarios
+//   - Credential support with proper security constraints
+//   - Custom expose headers for client access to response headers
+//   - Configurable cache control via MaxAge for preflight responses
+//   - Automatic Vary header management for proper caching behavior
+//   - Security hardening against CORS misconfigurations
+//
+// Security Considerations:
+//   - When AllowCredentials is true and AllowOrigins contains "*", the middleware
+//     will echo the specific origin instead of using "*" to prevent security issues
+//   - Origins are validated with exact string matching to prevent subdomain attacks
+//   - Always adds appropriate Vary headers for proper cache behavior
+//
+// Preflight Limitations:
+// For proper CORS support with preflight requests, you need to register OPTIONS handlers
+// for your routes, as HandlerFunc middleware can only process requests that match registered
+// routes. For automatic preflight handling without explicit OPTIONS routes, consider using
+// a different CORS solution.
 //
 // Example usage:
 //
-//	// Use default configuration (allows all origins)
+//	// Basic configuration (allows all origins)
 //	mux.Middleware(srv.CORSMiddleware(srv.DefaultCORSConfig))
+//
+//	// Production configuration with specific origins and credentials
+//	corsConfig := srv.CORSConfig{
+//	    AllowOrigins:     []string{"https://app.example.com", "https://admin.example.com"},
+//	    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+//	    AllowHeaders:     []string{"Content-Type", "Authorization", "X-API-Key"},
+//	    AllowCredentials: true,
+//	    ExposeHeaders:    []string{"X-Total-Count", "X-Rate-Limit"},
+//	    MaxAge:           3600, // Cache preflight for 1 hour
+//	}
+//	mux.Middleware(srv.CORSMiddleware(corsConfig))
+//
+//	// Remember to register OPTIONS handlers for preflight support
+//	mux.Options("", "/api/users", func(ctx Context) error { return nil })
+//	mux.Post("", "/api/users", createUser)
 func CORSMiddleware(config CORSConfig) HandlerFuncMiddleware {
 	// Apply defaults if not set
 	if len(config.AllowOrigins) == 0 {
@@ -132,18 +166,29 @@ func CORSMiddleware(config CORSConfig) HandlerFuncMiddleware {
 	}
 
 	// Pre-compute header values
+	allowMethods := strings.Join(config.AllowMethods, ", ")
+	allowHeaders := strings.Join(config.AllowHeaders, ", ")
 	exposeHeaders := strings.Join(config.ExposeHeaders, ", ")
+	maxAge := "0"
+	if config.MaxAge > 0 {
+		maxAge = strconv.Itoa(config.MaxAge)
+	}
 
 	return func(next HandlerFunc) HandlerFunc {
 		return func(ctx Context) error {
 			req := ctx.Request()
 			origin := req.Header.Get("Origin")
+			preFlight := http.MethodOptions == req.Method
 
 			// Always add Vary header for Origin
-			ctx.AddHeader("Vary", "Origin")
+			ctx.AddHeader(HeaderVary, HeaderOrigin)
 
 			// If no origin, this is likely not a CORS request
 			if origin == "" {
+				if preFlight {
+					ctx.WriteHeader(http.StatusNoContent)
+					return nil
+				}
 				return next(ctx)
 			}
 
@@ -165,20 +210,42 @@ func CORSMiddleware(config CORSConfig) HandlerFuncMiddleware {
 				}
 			}
 
-			// Set CORS headers if origin is allowed
-			if allowOrigin != "" {
-				ctx.SetHeader("Access-Control-Allow-Origin", allowOrigin)
-
-				if config.AllowCredentials {
-					ctx.SetHeader("Access-Control-Allow-Credentials", "true")
+			// Origin not allowed
+			if allowOrigin == "" {
+				if preFlight {
+					ctx.WriteHeader(http.StatusNoContent)
+					return nil
 				}
-
-				if exposeHeaders != "" {
-					ctx.SetHeader("Access-Control-Expose-Headers", exposeHeaders)
-				}
+				return next(ctx)
 			}
 
-			return next(ctx)
+			ctx.SetHeader(HeaderAccessControlAllowOrigin, allowOrigin)
+			if config.AllowCredentials {
+				ctx.SetHeader(HeaderAccessControlAllowCredentials, "true")
+			}
+			if !preFlight {
+				if exposeHeaders != "" {
+					ctx.SetHeader(HeaderAccessControlExposeHeaders, exposeHeaders)
+				}
+				return next(ctx)
+			}
+
+			// Preflight request
+			ctx.AddHeader(HeaderVary, HeaderAccessControlRequestMethod)
+			ctx.AddHeader(HeaderVary, HeaderAccessControlRequestHeaders)
+
+			ctx.SetHeader("Access-Control-Allow-Methods", allowMethods)
+			if allowHeaders != "" {
+				ctx.AddHeader(HeaderAccessControlAllowHeaders, allowHeaders)
+			} else {
+				reqHeaders := req.Header.Get(HeaderAccessControlRequestHeaders)
+				ctx.SetHeader(HeaderAccessControlAllowHeaders, reqHeaders)
+			}
+			if config.MaxAge != 0 {
+				ctx.SetHeader(HeaderAccessControlMaxAge, maxAge)
+			}
+			ctx.WriteHeader(http.StatusNoContent)
+			return nil
 		}
 	}
 }
@@ -204,7 +271,7 @@ type CORSConfig struct {
 	// response header. This header specifies the list of methods allowed when
 	// accessing the resource. This is used in response to a preflight request.
 	//
-	// Optional. Default value []string{"GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"}.
+	// Optional. Default value []string{"GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"}.
 	AllowMethods []string
 
 	// AllowHeaders determines the value of the Access-Control-Allow-Headers
@@ -246,6 +313,7 @@ var DefaultCORSConfig = CORSConfig{
 		http.MethodPatch,
 		http.MethodPost,
 		http.MethodDelete,
+		http.MethodOptions,
 	},
 	AllowHeaders:     []string{},
 	AllowCredentials: false,
@@ -316,8 +384,7 @@ func AddTrailingSlashMiddleware(config TrailingSlashConfig) HandlerFuncMiddlewar
 			// Handle redirect vs forward
 			if config.RedirectCode != 0 {
 				// Perform HTTP redirect
-				ctx.Redirect(config.RedirectCode, uri)
-				return nil
+				return ctx.Redirect(config.RedirectCode, uri)
 			}
 
 			// Forward internally by modifying the request

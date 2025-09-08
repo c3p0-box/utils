@@ -814,17 +814,21 @@ Converts panics to errors that are handled by the error handler
 // Default CORS configuration (allows all origins)
 mux.Middleware(srv.CORSMiddleware(srv.DefaultCORSConfig))
 
-// Custom CORS configuration
+// Production CORS configuration with security best practices
 corsConfig := srv.CORSConfig{
-    AllowOrigins:     []string{"https://example.com"},
-    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
-    AllowHeaders:     []string{"Content-Type", "Authorization"},
+    AllowOrigins:     []string{"https://app.example.com", "https://admin.example.com"},
+    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+    AllowHeaders:     []string{"Content-Type", "Authorization", "X-API-Key"},
     AllowCredentials: true,
-    MaxAge:           3600,
+    ExposeHeaders:    []string{"X-Total-Count", "X-Rate-Limit", "X-Page-Count"},
+    MaxAge:           3600, // Cache preflight responses for 1 hour
 }
 mux.Middleware(srv.CORSMiddleware(corsConfig))
+
+// Note: For preflight requests, register OPTIONS handlers explicitly
+mux.Options("", "/api/*", func(ctx Context) error { return nil })
 ```
-Handles Cross-Origin Resource Sharing with configurable origins, methods, headers, and security options
+Handles Cross-Origin Resource Sharing with W3C-compliant preflight support, origin validation, credential handling, expose headers, and security hardening. Includes automatic Vary header management and protection against common CORS misconfigurations.
 
 **Trailing Slash Middleware**
 ```go
@@ -1407,19 +1411,42 @@ if err := ctx.JSON(200, data); err != nil {
 Configure CORS appropriately for your security requirements:
 
 ```go
-// Development - permissive CORS
+// Development - permissive CORS (use only for development)
 mux.Middleware(srv.CORSMiddleware(srv.DefaultCORSConfig))
 
-// Production - restrictive CORS
+// Production - restrictive CORS with security best practices
 prodCorsConfig := srv.CORSConfig{
-    AllowOrigins:     []string{"https://yourdomain.com"},
-    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
-    AllowHeaders:     []string{"Content-Type", "Authorization"},
+    // Specify exact origins - avoid wildcards in production
+    AllowOrigins:     []string{"https://yourdomain.com", "https://app.yourdomain.com"},
+    
+    // Include OPTIONS for preflight support
+    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+    
+    // Explicitly list allowed headers
+    AllowHeaders:     []string{"Content-Type", "Authorization", "X-API-Key"},
+    
+    // Enable credentials for authenticated requests
     AllowCredentials: true,
+    
+    // Expose custom headers to clients
+    ExposeHeaders:    []string{"X-Total-Count", "X-Rate-Limit", "Link"},
+    
+    // Cache preflight responses for better performance
     MaxAge:           3600,
 }
 mux.Middleware(srv.CORSMiddleware(prodCorsConfig))
+
+// Register OPTIONS handlers for preflight requests
+mux.Options("", "/api/users", func(ctx Context) error { return nil })
+mux.Options("", "/api/users/{id}", func(ctx Context) error { return nil })
 ```
+
+**Security Guidelines:**
+- Never use `["*"]` for `AllowOrigins` with `AllowCredentials: true`
+- Use specific origins instead of wildcards in production
+- Only expose headers that clients actually need via `ExposeHeaders`
+- Set appropriate `MaxAge` to balance performance and security
+- Always validate that your frontend origins match exactly
 
 ### 5. Trailing Slash Configuration
 Configure trailing slash behavior based on your needs:
