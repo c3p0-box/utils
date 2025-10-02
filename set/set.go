@@ -51,3 +51,16 @@ func (s Set[T]) ToSlice() []T {
 	}
 	return items
 }
+
+func Add[T comparable](set Set[T], item T) {
+	set[item] = Void{}
+}
+
+func Contains[T comparable](set Set[T], item T) bool {
+	_, exists := set[item]
+	return exists
+}
+
+func Remove[T comparable](set Set[T], item T) {
+	delete(set, item)
+}

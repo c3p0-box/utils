@@ -2,7 +2,30 @@ package set
 
 import "testing"
 
-func TestAdd(t *testing.T) {
+func TestAddFunc(t *testing.T) {
+	// String set
+	strSet := New[string]()
+	if len(strSet) != 0 {
+		t.Fatalf("expected empty set, got %d", len(strSet))
+	}
+
+	Add(strSet, "x")
+	if len(strSet) != 1 {
+		t.Fatalf("expected set size 1, got %d", len(strSet))
+	}
+
+	// Int set
+	intSet := New[int]()
+	if len(intSet) != 0 {
+		t.Fatalf("expected empty set, got %d", len(intSet))
+	}
+	Add(intSet, 1)
+	if len(intSet) != 1 {
+		t.Fatalf("expected set size 1, got %d", len(intSet))
+	}
+}
+
+func TestAddMethod(t *testing.T) {
 	// String set
 	strSet := New[string]()
 	if len(strSet) != 0 {
@@ -25,7 +48,27 @@ func TestAdd(t *testing.T) {
 	}
 }
 
-func TestContains(t *testing.T) {
+func TestContainsFunc(t *testing.T) {
+	strSet := New[string]()
+	if Contains(strSet, "item") {
+		t.Fatalf("did not expect item to exist")
+	}
+	strSet.Add("item")
+	if !Contains(strSet, "item") {
+		t.Fatalf("expected item to exist after adding")
+	}
+
+	intSet := New[int]()
+	if Contains(intSet, 100) {
+		t.Fatalf("did not expect 100 to exist")
+	}
+	intSet.Add(100)
+	if !Contains(intSet, 100) {
+		t.Fatalf("expected 100 to exist after adding")
+	}
+}
+
+func TestContainsMethod(t *testing.T) {
 	strSet := New[string]()
 	if strSet.Contains("item") {
 		t.Fatalf("did not expect item to exist")
@@ -45,7 +88,33 @@ func TestContains(t *testing.T) {
 	}
 }
 
-func TestRemove(t *testing.T) {
+func TestRemoveFunc(t *testing.T) {
+	// String set
+	strSet := New[string]()
+	Add(strSet, "item1")
+	Add(strSet, "item2")
+	Remove(strSet, "item1")
+	if Contains(strSet, "item1") {
+		t.Fatalf("expected item1 to be removed")
+	}
+	if !Contains(strSet, "item2") {
+		t.Fatalf("expected item2 to still exist")
+	}
+
+	// Int set
+	intSet := New[int]()
+	Add(intSet, 100)
+	Add(intSet, 200)
+	Remove(intSet, 100)
+	if Contains(intSet, 100) {
+		t.Fatalf("expected 100 to be removed")
+	}
+	if !Contains(intSet, 200) {
+		t.Fatalf("expected 200 to still exist")
+	}
+}
+
+func TestRemoveMethod(t *testing.T) {
 	// String set
 	strSet := New[string]()
 	strSet.Add("item1")
@@ -71,7 +140,7 @@ func TestRemove(t *testing.T) {
 	}
 }
 
-func TestIsEmptyClearToSlice(t *testing.T) {
+func TestIsEmptyMethodClearToSlice(t *testing.T) {
 	// Create a set and ensure it is initially empty
 	s := New[int]()
 	if !s.IsEmpty() {
