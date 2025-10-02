@@ -25,6 +25,29 @@ func TestAddFunc(t *testing.T) {
 	}
 }
 
+func TestAddListFunc(t *testing.T) {
+	// String set
+	strSet := New[string]()
+	if len(strSet) != 0 {
+		t.Fatalf("expected empty set, got %d", len(strSet))
+	}
+
+	AddList(strSet, []string{"val1", "val2"})
+	if len(strSet) != 2 {
+		t.Fatalf("expected set size 2, got %d", len(strSet))
+	}
+
+	// Int set
+	intSet := New[int]()
+	if len(intSet) != 0 {
+		t.Fatalf("expected empty set, got %d", len(intSet))
+	}
+	AddList(intSet, []int{1, 2})
+	if len(intSet) != 2 {
+		t.Fatalf("expected set size 2, got %d", len(intSet))
+	}
+}
+
 func TestAddMethod(t *testing.T) {
 	// String set
 	strSet := New[string]()
@@ -45,6 +68,29 @@ func TestAddMethod(t *testing.T) {
 	intSet.Add(1)
 	if len(intSet) != 1 {
 		t.Fatalf("expected set size 1, got %d", len(intSet))
+	}
+}
+
+func TestAddListMethod(t *testing.T) {
+	// String set
+	strSet := New[string]()
+	if len(strSet) != 0 {
+		t.Fatalf("expected empty set, got %d", len(strSet))
+	}
+
+	strSet.AddList([]string{"val1", "val2"})
+	if len(strSet) != 2 {
+		t.Fatalf("expected set size 2, got %d", len(strSet))
+	}
+
+	// Int set
+	intSet := New[int]()
+	if len(intSet) != 0 {
+		t.Fatalf("expected empty set, got %d", len(intSet))
+	}
+	intSet.AddList([]int{1, 2})
+	if len(intSet) != 2 {
+		t.Fatalf("expected set size 2, got %d", len(intSet))
 	}
 }
 

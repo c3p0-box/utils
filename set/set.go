@@ -15,6 +15,12 @@ func (s Set[T]) Add(item T) {
 	s[item] = Void{}
 }
 
+func (s Set[T]) AddList(items []T) {
+	for i := range items {
+		s[items[i]] = Void{}
+	}
+}
+
 // Contains checks if an item exists in the set
 func (s Set[T]) Contains(item T) bool {
 	_, exists := s[item]
@@ -54,6 +60,12 @@ func (s Set[T]) ToSlice() []T {
 
 func Add[T comparable](set Set[T], item T) {
 	set[item] = Void{}
+}
+
+func AddList[T comparable](set Set[T], items []T) {
+	for i := range items {
+		set[items[i]] = Void{}
+	}
 }
 
 func Contains[T comparable](set Set[T], item T) bool {
