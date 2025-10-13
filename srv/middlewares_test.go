@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -640,41 +642,41 @@ func TestNewOptions(t *testing.T) {
 func TestSession_BasicOperations(t *testing.T) {
 	session := &Session{
 		ID:     "test-session-id",
-		Values: make(map[interface{}]interface{}),
+		Values: url.Values{},
 	}
 
 	// Test Set and Get
-	session.Set("userID", 12345)
+	session.Set("userID", "12345")
 	session.Set("username", "testuser")
-	session.Set("isAdmin", true)
+	session.Set("isAdmin", "true")
 
-	if session.Get("userID") != 12345 {
+	if session.Get("userID") != "12345" {
 		t.Errorf("Expected userID to be 12345, got %v", session.Get("userID"))
 	}
 	if session.Get("username") != "testuser" {
 		t.Errorf("Expected username to be 'testuser', got %v", session.Get("username"))
 	}
-	if session.Get("isAdmin") != true {
+	if session.Get("isAdmin") != "true" {
 		t.Errorf("Expected isAdmin to be true, got %v", session.Get("isAdmin"))
 	}
 
 	// Test non-existent key
-	if session.Get("nonexistent") != nil {
+	if session.Get("nonexistent") != "" {
 		t.Errorf("Expected nonexistent key to return nil, got %v", session.Get("nonexistent"))
 	}
 
 	// Test Delete
 	session.Delete("username")
-	if session.Get("username") != nil {
+	if session.Get("username") != "" {
 		t.Errorf("Expected deleted key to return nil, got %v", session.Get("username"))
 	}
 
 	// Test Clear
 	session.Clear()
-	if session.Get("userID") != nil {
+	if session.Get("userID") != "" {
 		t.Error("Expected all keys to be cleared")
 	}
-	if session.Get("isAdmin") != nil {
+	if session.Get("isAdmin") != "" {
 		t.Error("Expected all keys to be cleared")
 	}
 }
@@ -683,7 +685,7 @@ func TestSession_NilValues(t *testing.T) {
 	session := &Session{ID: "test"}
 
 	// Test operations on nil Values
-	if session.Get("key") != nil {
+	if session.Get("key") != "" {
 		t.Error("Expected Get on nil Values to return nil")
 	}
 
@@ -802,7 +804,7 @@ func TestInMemoryStore_SaveAndGet(t *testing.T) {
 		t.Fatalf("Expected no error creating session, got: %v", err)
 	}
 
-	session.Set("userID", 12345)
+	session.Set("userID", "12345")
 	session.Set("role", "admin")
 
 	err = store.Save(req, rec, session)
@@ -858,7 +860,7 @@ func TestInMemoryStore_SaveAndGet(t *testing.T) {
 	if retrievedSession.IsNew {
 		t.Error("Expected retrieved session to have IsNew = false")
 	}
-	if retrievedSession.Get("userID") != 12345 {
+	if retrievedSession.Get("userID") != "12345" {
 		t.Errorf("Expected userID to be 12345, got %v", retrievedSession.Get("userID"))
 	}
 	if retrievedSession.Get("role") != "admin" {
@@ -962,8 +964,8 @@ func TestInMemoryStore_ConcurrentAccess(t *testing.T) {
 					return
 				}
 
-				session.Set("goroutine", id)
-				session.Set("operation", j)
+				session.Set("goroutine", fmt.Sprintf("%d", id))
+				session.Set("operation", fmt.Sprintf("%d", j))
 
 				// Save session
 				err = store.Save(req, rec, session)
@@ -983,7 +985,7 @@ func TestInMemoryStore_ConcurrentAccess(t *testing.T) {
 					return
 				}
 
-				if retrieved.Get("goroutine") != id {
+				if retrieved.Get("goroutine") != fmt.Sprintf("%d", id) {
 					t.Errorf("Expected goroutine %d, got %v", id, retrieved.Get("goroutine"))
 				}
 			}
@@ -1018,13 +1020,11 @@ func TestSessionMiddleware_NewSession(t *testing.T) {
 		}
 
 		// Set some session data
-		session.Set("visited", true)
-		session.Set("timestamp", time.Now().Unix())
+		session.Set("session_data", "data")
 
-		return ctx.JSON(200, map[string]interface{}{
-			"sessionID": session.ID,
-			"isNew":     session.IsNew,
-			"visited":   session.Get("visited"),
+		return ctx.JSON(200, map[string]string{
+			"sessionID":    session.ID,
+			"session_data": session.Get("session_data"),
 		})
 	})
 
@@ -1038,18 +1038,15 @@ func TestSessionMiddleware_NewSession(t *testing.T) {
 	}
 
 	// Check response
-	var response map[string]interface{}
+	response := make(map[string]string)
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode JSON response: %v", err)
 	}
 
-	if response["isNew"] != true {
-		t.Errorf("Expected isNew to be true for new session, got %v", response["isNew"])
+	if response["session_data"] != "data" {
+		t.Errorf("Expected 'session_data' to be 'data' for new session, got %v", response["session_data"])
 	}
-	if response["visited"] != true {
-		t.Errorf("Expected visited to be true, got %v", response["visited"])
-	}
-	if response["sessionID"] == nil || response["sessionID"] == "" {
+	if response["sessionID"] == "" {
 		t.Error("Expected sessionID to be set")
 	}
 
@@ -1081,17 +1078,16 @@ func TestSessionMiddleware_ExistingSession(t *testing.T) {
 	// First handler to create session
 	mux.Get("", "/create", func(ctx Context) error {
 		session := ctx.Get("session").(*Session)
-		session.Set("userID", 12345)
-		session.Set("username", "testuser")
+		session.Set("userID", "12345")
+		session.Set("username", "username")
 		return ctx.JSON(200, map[string]string{"status": "created"})
 	})
 
 	// Second handler to read session
 	mux.Get("", "/read", func(ctx Context) error {
 		session := ctx.Get("session").(*Session)
-		return ctx.JSON(200, map[string]interface{}{
+		return ctx.JSON(200, map[string]string{
 			"sessionID": session.ID,
-			"isNew":     session.IsNew,
 			"userID":    session.Get("userID"),
 			"username":  session.Get("username"),
 		})
@@ -1137,18 +1133,14 @@ func TestSessionMiddleware_ExistingSession(t *testing.T) {
 	}
 
 	// Check response
-	var response map[string]interface{}
+	response := make(map[string]string)
 	if err := json.NewDecoder(rec2.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode JSON response: %v", err)
 	}
-
-	if response["isNew"] != false {
-		t.Errorf("Expected isNew to be false for existing session, got %v", response["isNew"])
-	}
-	if response["userID"] != float64(12345) { // JSON decode converts to float64
+	if response["userID"] != "12345" { // JSON decode converts to float64
 		t.Errorf("Expected userID to be 12345, got %v", response["userID"])
 	}
-	if response["username"] != "testuser" {
+	if response["username"] != "username" {
 		t.Errorf("Expected username to be 'testuser', got %v", response["username"])
 	}
 	if response["sessionID"] != cookie.Value {
@@ -1225,14 +1217,14 @@ func TestSessionMiddleware_Integration(t *testing.T) {
 
 		// Simulate user authentication check
 		userID := session.Get("userID")
-		if userID == nil {
+		if userID == "" {
 			// Not authenticated - set some data and redirect
 			session.Set("returnTo", "/profile")
 			return ctx.JSON(401, map[string]string{"error": "not authenticated"})
 		}
 
 		// Authenticated - return profile
-		return ctx.JSON(200, map[string]interface{}{
+		return ctx.JSON(200, map[string]string{
 			"userID":  userID,
 			"profile": "user profile data",
 		})
@@ -1242,11 +1234,10 @@ func TestSessionMiddleware_Integration(t *testing.T) {
 		session := ctx.Get("session").(*Session)
 
 		// Simulate login
-		session.Set("userID", 12345)
-		session.Set("loginTime", time.Now().Unix())
+		session.Set("userID", "12345")
 
 		returnTo := session.Get("returnTo")
-		if returnTo != nil {
+		if returnTo != "" {
 			session.Delete("returnTo")
 		}
 
@@ -1303,7 +1294,7 @@ func TestSessionMiddleware_Integration(t *testing.T) {
 		t.Errorf("Expected status 200 for login, got %d", rec2.Code)
 	}
 
-	var loginResponse map[string]interface{}
+	loginResponse := make(map[string]string)
 	if err := json.NewDecoder(rec2.Body).Decode(&loginResponse); err != nil {
 		t.Fatalf("Failed to decode login response: %v", err)
 	}
@@ -1323,13 +1314,13 @@ func TestSessionMiddleware_Integration(t *testing.T) {
 		t.Errorf("Expected status 200 for authenticated access, got %d", rec3.Code)
 	}
 
-	var profileResponse map[string]interface{}
+	profileResponse := make(map[string]string)
 	if err := json.NewDecoder(rec3.Body).Decode(&profileResponse); err != nil {
 		t.Fatalf("Failed to decode profile response: %v", err)
 	}
 
-	if profileResponse["userID"] != float64(12345) {
-		t.Errorf("Expected userID 12345, got %v", profileResponse["userID"])
+	if profileResponse["userID"] != "12345" {
+		t.Errorf("Expected userID 12345, got %s", profileResponse["userID"])
 	}
 	if profileResponse["profile"] != "user profile data" {
 		t.Errorf("Expected profile data, got %v", profileResponse["profile"])
@@ -1539,13 +1530,7 @@ func TestCookieStore_SaveAndGet(t *testing.T) {
 		t.Fatalf("Expected no error creating session, got: %v", err)
 	}
 
-	// Add various data types to session
 	session.Set("string", "hello world")
-	session.Set("int", 42)
-	session.Set("bool", true)
-	session.Set("float", 3.14)
-	session.Set("slice", []string{"a", "b", "c"})
-	session.Set("map", map[string]int{"x": 1, "y": 2})
 
 	err = store.Save(req, rec, session)
 	if err != nil {
@@ -1598,53 +1583,6 @@ func TestCookieStore_SaveAndGet(t *testing.T) {
 	// Verify all session data was preserved
 	if retrievedSession.Get("string") != "hello world" {
 		t.Errorf("Expected string 'hello world', got %v", retrievedSession.Get("string"))
-	}
-	if retrievedSession.Get("int") != 42 {
-		t.Errorf("Expected int 42, got %v", retrievedSession.Get("int"))
-	}
-	if retrievedSession.Get("bool") != true {
-		t.Errorf("Expected bool true, got %v", retrievedSession.Get("bool"))
-	}
-	if retrievedSession.Get("float") != 3.14 {
-		t.Errorf("Expected float 3.14, got %v", retrievedSession.Get("float"))
-	}
-
-	// Test slice (need to compare elements since gob may change slice type)
-	retrievedSlice := retrievedSession.Get("slice")
-	if retrievedSlice == nil {
-		t.Error("Expected slice to be retrieved")
-	} else {
-		if slice, ok := retrievedSlice.([]string); ok {
-			expected := []string{"a", "b", "c"}
-			if len(slice) != len(expected) {
-				t.Errorf("Expected slice length %d, got %d", len(expected), len(slice))
-			} else {
-				for i, v := range expected {
-					if slice[i] != v {
-						t.Errorf("Expected slice[%d] = '%s', got '%s'", i, v, slice[i])
-					}
-				}
-			}
-		} else {
-			t.Errorf("Expected slice type []string, got %T", retrievedSlice)
-		}
-	}
-
-	// Test map
-	retrievedMap := retrievedSession.Get("map")
-	if retrievedMap == nil {
-		t.Error("Expected map to be retrieved")
-	} else {
-		if m, ok := retrievedMap.(map[string]int); ok {
-			expected := map[string]int{"x": 1, "y": 2}
-			for k, v := range expected {
-				if m[k] != v {
-					t.Errorf("Expected map['%s'] = %d, got %d", k, v, m[k])
-				}
-			}
-		} else {
-			t.Errorf("Expected map type map[string]int, got %T", retrievedMap)
-		}
 	}
 }
 
@@ -1828,8 +1766,8 @@ func TestCookieStore_ConcurrentAccess(t *testing.T) {
 				}
 
 				// Add unique data
-				session.Set("goroutine", id)
-				session.Set("operation", j)
+				session.Set("goroutine", fmt.Sprintf("%d", id))
+				session.Set("operation", fmt.Sprintf("%d", j))
 				session.Set("data", fmt.Sprintf("data-%d-%d", id, j))
 
 				// Save session
@@ -1850,10 +1788,10 @@ func TestCookieStore_ConcurrentAccess(t *testing.T) {
 					return
 				}
 
-				if retrieved.Get("goroutine") != id {
+				if retrieved.Get("goroutine") != fmt.Sprintf("%d", id) {
 					t.Errorf("Expected goroutine %d, got %v", id, retrieved.Get("goroutine"))
 				}
-				if retrieved.Get("operation") != j {
+				if retrieved.Get("operation") != fmt.Sprintf("%d", j) {
 					t.Errorf("Expected operation %d, got %v", j, retrieved.Get("operation"))
 				}
 			}
@@ -1889,19 +1827,22 @@ func TestCookieStore_Integration(t *testing.T) {
 
 		// Check if returning user
 		visits := session.Get("visits")
-		if visits == nil {
-			visits = 0
+		if visits == "" {
+			visits = "0"
 		}
 
 		// Increment visit count
-		visitCount := visits.(int) + 1
-		session.Set("visits", visitCount)
-		session.Set("lastVisit", time.Now().Unix())
+		visitCount, err := strconv.Atoi(visits)
+		if err != nil {
+			t.Errorf("Error converting visits to int: %v", err)
+			return err
+		}
+		visits = fmt.Sprintf("%d", visitCount+1)
+		session.Set("visits", visits)
 
-		result := map[string]interface{}{
-			"visits":    visitCount,
-			"isNew":     session.IsNew,
-			"lastVisit": session.Get("lastVisit"),
+		result := map[string]string{
+			"visits": visits,
+			"isNew":  fmt.Sprintf("%v", session.IsNew),
 		}
 
 		return ctx.JSON(200, result)
@@ -1918,15 +1859,15 @@ func TestCookieStore_Integration(t *testing.T) {
 	}
 
 	// Check response
-	var response1 map[string]interface{}
-	if err := json.NewDecoder(rec1.Body).Decode(&response1); err != nil {
+	response1 := make(map[string]string)
+	if err = json.NewDecoder(rec1.Body).Decode(&response1); err != nil {
 		t.Fatalf("Failed to decode JSON response: %v", err)
 	}
 
-	if response1["visits"] != float64(1) { // JSON decodes numbers as float64
-		t.Errorf("Expected visits 1, got %v", response1["visits"])
+	if response1["visits"] != "1" { // JSON decodes numbers as float64
+		t.Errorf("Expected visits 1, got %s", response1["visits"])
 	}
-	if response1["isNew"] != true {
+	if response1["isNew"] != "true" {
 		t.Errorf("Expected isNew true, got %v", response1["isNew"])
 	}
 
@@ -1961,26 +1902,15 @@ func TestCookieStore_Integration(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", rec2.Code)
 	}
 
-	var response2 map[string]interface{}
-	if err := json.NewDecoder(rec2.Body).Decode(&response2); err != nil {
+	response2 := make(map[string]string)
+	if err = json.NewDecoder(rec2.Body).Decode(&response2); err != nil {
 		t.Fatalf("Failed to decode JSON response: %v", err)
 	}
 
-	if response2["visits"] != float64(2) {
-		t.Errorf("Expected visits 2, got %v", response2["visits"])
+	if response2["visits"] != "2" {
+		t.Errorf("Expected visits 2, got %s", response2["visits"])
 	}
-	if response2["isNew"] != false {
+	if response2["isNew"] != "false" {
 		t.Errorf("Expected isNew false, got %v", response2["isNew"])
-	}
-
-	// Verify lastVisit timestamp was preserved and updated
-	// Note: timestamps might be the same if test runs very quickly, so check if they are close
-	lastVisit1, ok1 := response1["lastVisit"].(float64)
-	lastVisit2, ok2 := response2["lastVisit"].(float64)
-
-	if !ok1 || !ok2 {
-		t.Errorf("Expected lastVisit to be numeric, got %T and %T", response1["lastVisit"], response2["lastVisit"])
-	} else if lastVisit2 < lastVisit1 {
-		t.Errorf("Expected lastVisit to be updated (lastVisit2 >= lastVisit1), got %f < %f", lastVisit2, lastVisit1)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -512,7 +513,7 @@ type Session struct {
 	// user data.
 	ID string
 	// Values contains the user-data for the session.
-	Values  map[interface{}]interface{}
+	Values  url.Values
 	Options *Options
 	IsNew   bool
 	store   Store
@@ -520,32 +521,32 @@ type Session struct {
 }
 
 // Get retrieves a value from the session by key.
-func (s *Session) Get(key interface{}) interface{} {
+func (s *Session) Get(key string) string {
 	if s.Values == nil {
-		return nil
+		return ""
 	}
-	return s.Values[key]
+	return s.Values.Get(key)
 }
 
 // Set stores a value in the session with the given key.
-func (s *Session) Set(key, value interface{}) {
+func (s *Session) Set(key, value string) {
 	if s.Values == nil {
-		s.Values = make(map[interface{}]interface{})
+		s.Values = url.Values{}
 	}
-	s.Values[key] = value
+	s.Values.Set(key, value)
 }
 
 // Delete removes a key from the session.
-func (s *Session) Delete(key interface{}) {
+func (s *Session) Delete(key string) {
 	if s.Values == nil {
 		return
 	}
-	delete(s.Values, key)
+	s.Values.Del(key)
 }
 
 // Clear removes all values from the session.
 func (s *Session) Clear() {
-	s.Values = make(map[interface{}]interface{})
+	s.Values = url.Values{}
 }
 
 // Save persists the session to the underlying store.
@@ -578,7 +579,7 @@ type Store interface {
 
 // sessionData holds session information with expiration.
 type sessionData struct {
-	Values    map[interface{}]interface{}
+	Values    url.Values
 	CreatedAt time.Time
 	ExpiresAt time.Time
 }
@@ -650,7 +651,7 @@ func (s *InMemoryStore) New(_ *http.Request, name string) (*Session, error) {
 
 	session := &Session{
 		ID:      sessionID,
-		Values:  make(map[interface{}]interface{}),
+		Values:  url.Values{},
 		Options: s.options,
 		IsNew:   true,
 		store:   s,
@@ -851,7 +852,7 @@ func (c *CookieStore) Get(r *http.Request, name string) (*Session, error) {
 func (c *CookieStore) New(_ *http.Request, name string) (*Session, error) {
 	session := &Session{
 		ID:      "", // Not used for cookie store
-		Values:  make(map[interface{}]interface{}),
+		Values:  url.Values{},
 		Options: c.options,
 		IsNew:   true,
 		store:   c,
@@ -917,7 +918,7 @@ func (c *CookieStore) Save(_ *http.Request, w http.ResponseWriter, session *Sess
 }
 
 // encryptSessionData serializes and encrypts session values using AES-GCM.
-func (c *CookieStore) encryptSessionData(values map[interface{}]interface{}) ([]byte, error) {
+func (c *CookieStore) encryptSessionData(values url.Values) ([]byte, error) {
 	// Serialize session values using gob
 	var buf bytes.Buffer
 	encoder := gob.NewEncoder(&buf)
@@ -939,7 +940,7 @@ func (c *CookieStore) encryptSessionData(values map[interface{}]interface{}) ([]
 }
 
 // decryptSessionData decrypts and deserializes session values.
-func (c *CookieStore) decryptSessionData(encryptedData []byte) (map[interface{}]interface{}, error) {
+func (c *CookieStore) decryptSessionData(encryptedData []byte) (url.Values, error) {
 	if len(encryptedData) < c.cipher.NonceSize() {
 		return nil, errors.New("encrypted data too short")
 	}
@@ -955,9 +956,9 @@ func (c *CookieStore) decryptSessionData(encryptedData []byte) (map[interface{}]
 	}
 
 	// Deserialize using gob
-	var values map[interface{}]interface{}
+	values := url.Values{}
 	decoder := gob.NewDecoder(bytes.NewReader(plaintext))
-	if err := decoder.Decode(&values); err != nil {
+	if err = decoder.Decode(&values); err != nil {
 		return nil, fmt.Errorf("failed to decode session data: %w", err)
 	}
 
