@@ -22,8 +22,9 @@
 //		})
 //	})
 //
-//	// Chain middleware
-//	handler := srv.MiddlewareChain(srv.Logging, srv.Recover)(mux)
+//	// Chain middleware using the Mux Middleware method
+//	mux.Middleware(srv.LoggingMiddleware)
+//	mux.Middleware(srv.RecoverMiddleware)
 //
 //	// Run server with graceful shutdown
 //	err := srv.RunServer(handler, "localhost", "8080", func() error {

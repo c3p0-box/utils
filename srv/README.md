@@ -852,17 +852,17 @@ mux.Middleware(srv.SessionMiddleware(store, "app-session"))
 
 // Use sessions in handlers
 mux.Get("profile", "/profile", func(ctx srv.Context) error {
-    session := srv.SessionFromContext(ctx)
+    session := ctx.Get("session").(*srv.Session)
     userID := session.Get("userID")
-    if userID == nil {
+    if userID == "" {
         return ctx.Redirect(302, "/login")
     }
     return ctx.JSON(200, map[string]interface{}{"userID": userID})
 })
 
 mux.Post("login", "/login", func(ctx srv.Context) error {
-    session := srv.SessionFromContext(ctx)
-    session.Set("userID", 12345)
+    session := ctx.Get("session").(*srv.Session)
+    session.Set("userID", "12345")
     session.Set("username", "john_doe")
     return ctx.JSON(200, map[string]string{"status": "logged in"})
 })

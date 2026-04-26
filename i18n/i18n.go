@@ -1,3 +1,27 @@
+// Package i18n provides a simple, thread-safe internationalization library for Go
+// that supports translation management with template support and pluralization.
+//
+// This package uses a singleton pattern with a global Manager instance for easy
+// access across your application. It supports template-based message rendering,
+// automatic fallback to default language, and thread-safe concurrent access.
+//
+// Features:
+//   - Singleton Pattern: Global instance for easy access
+//   - Language Support: Uses golang.org/x/text/language.Tag for robust handling
+//   - Template Support: Go templates for dynamic content injection
+//   - Pluralization: Automatic singular/plural form selection based on count
+//   - Thread-Safe: Safe for concurrent access with appropriate mutexes
+//   - Minimal Dependencies: Only Go standard library + golang.org/x/text
+//   - Fallback Support: Automatic fallback to default language
+//   - Template Caching: Efficient template parsing and caching
+//
+// Quick Start:
+//
+//	i18n.SetDefaultLanguage(language.English)
+//	i18n.AddTranslation(language.English, "hello", "Hello, {{.Name}}!", "")
+//	msg := i18n.Translate(language.English, "hello", 1, map[string]interface{}{"Name": "World"})
+//
+// For more advanced usage, see the Manager type and its methods.
 package i18n
 
 import (

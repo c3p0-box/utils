@@ -22,11 +22,11 @@
 //	err := erm.RequiredError("email", "")
 //	fmt.Println(err.Error()) // "email is required"
 //
-//	// Localized field name using message key
-//	err := erm.RequiredErrorWithFieldKey("email", "fields.email", "")
+//	// Localized field name (variadic field message key parameter)
+//	err := erm.RequiredError("email", "", "fields.email")
 //	// If "fields.email" translates to "Email Address", displays: "Email Address is required"
 //
-//	// Manual field localization
+//	// Manual field localization on existing errors
 //	err := erm.NewValidationError("validation.required", "user_email", "").
 //		WithFieldMessageKey("fields.user_email")
 //

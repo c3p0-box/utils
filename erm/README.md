@@ -1,6 +1,6 @@
 # ERM - Enhanced Error Management for Go
 
-A comprehensive error management package for Go applications following clean architecture patterns. ERM enriches errors with stack traces, HTTP status codes, safe user-facing messages, validation error capabilities, and error collection support, while providing **standard internationalization through go-i18n**.
+A comprehensive error management package for Go applications following clean architecture patterns. ERM enriches errors with stack traces, HTTP status codes, safe user-facing messages, validation error capabilities, and error collection support, while providing **lightweight internationalization through the custom c3p0-box/utils/i18n package**.
 
 ## Features
 
@@ -8,7 +8,7 @@ A comprehensive error management package for Go applications following clean arc
 - **Performance Optimized**: Stack traces only captured for Internal Server Errors (500) where debugging is needed
 - **Validation Support**: Unified validation errors with field-level granularity  
 - **Error Collection**: Collect multiple related errors with automatic flattening
-- **Standard i18n**: Uses `github.com/nicksnyder/go-i18n/v2/i18n` for internationalization
+- **Lightweight i18n**: Uses the custom `github.com/c3p0-box/utils/i18n` package for internationalization
 - **On-Demand Localization**: Messages resolved when `Error()` or `ErrMap()` called
 - **Per-Language Localizers**: Automatic creation and caching of localizers for different languages
 - **Clean Architecture**: Interface-based design for testability and flexibility
@@ -141,7 +141,7 @@ Define field name translations in your message files:
 
 ```go
 import (
-    "github.com/nicksnyder/go-i18n/v2/i18n"
+    "github.com/c3p0-box/utils/i18n"
     "golang.org/x/text/language"
 )
 
@@ -150,18 +150,16 @@ englishLocalizer := erm.GetLocalizer(language.English)
 spanishLocalizer := erm.GetLocalizer(language.Spanish)
 
 // For advanced usage with custom message files:
-bundle := i18n.NewBundle(language.English)
-bundle.RegisterUnmarshalFunc("json", json.Unmarshal)
-bundle.LoadMessageFile("locales/en.json")
-bundle.LoadMessageFile("locales/es.json")
+i18n.SetDefaultLanguage(language.English)
 
-// Create custom localizer
-customLocalizer := i18n.NewLocalizer(bundle, "es")
+// Add translations programmatically
+i18n.AddTranslation(language.English, "validation.required", "{{.field}} is required", "")
+i18n.AddTranslation(language.Spanish, "validation.required", "{{.field}} es requerido", "")
 ```
 
 ### Message File Format
 
-Create message files in standard go-i18n format:
+Create translations in JSON format compatible with the custom i18n package:
 
 **locales/en.json**
 ```json

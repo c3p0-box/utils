@@ -81,7 +81,8 @@
 //
 // # Internationalization
 //
-// Error messages are localized using the standard go-i18n package through ERM integration.
+// Error messages are localized using the custom i18n package (github.com/c3p0-box/utils/i18n)
+// through ERM integration.
 // Set up a localizer in your application initialization:
 //
 //	// Get localizers for different languages

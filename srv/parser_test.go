@@ -724,8 +724,8 @@ func TestParseRequest_TextUnmarshaler_QueryParams(t *testing.T) {
 					_, _ = hex.Decode(id[:], []byte("fedcba9876543210fedcba9876543210"))
 					return &id
 				}(),
-				CreatedAtPtr: func() *CustomTime { ct := CustomTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)); return &ct }(),
-				PriorityPtr:  func() *CustomInt { ci := CustomInt(0); return &ci }(),
+				CreatedAtPtr: func() *CustomTime { ; return new(CustomTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))) }(),
+				PriorityPtr:  func() *CustomInt { ; return new(CustomInt(0)) }(),
 			},
 			wantErr: false,
 		},

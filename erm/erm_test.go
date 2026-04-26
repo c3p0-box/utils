@@ -37,11 +37,6 @@ func TestNew(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := New(tt.code, tt.msg, tt.err)
 
-			// Verify interface implementation
-			if _, ok := e.(Error); !ok {
-				t.Fatal("New() should return Error interface")
-			}
-
 			// Verify fields
 			if e.Code() != tt.wantCode {
 				t.Fatalf("Code() = %d, want %d", e.Code(), tt.wantCode)
@@ -68,8 +63,7 @@ func TestNew(t *testing.T) {
 				}
 
 				// Test errors.As
-				var target *StackError
-				if !errors.As(e, &target) {
+				if _, ok := errors.AsType[*StackError](e); !ok {
 					t.Fatal("errors.As should extract *StackError")
 				}
 			}
@@ -862,10 +856,6 @@ func TestWrap(t *testing.T) {
 
 		if wrapped == stdErr {
 			t.Fatal("Wrap should create new erm error for standard errors")
-		}
-
-		if _, ok := wrapped.(Error); !ok {
-			t.Fatal("Wrap should return Error interface")
 		}
 
 		if Status(wrapped) != http.StatusInternalServerError {
